@@ -1,0 +1,127 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Configure (Debug)",
+      "type": "shell",
+      "command": "cmake --preset Debug",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Configure (Release)",
+      "type": "shell",
+      "command": "cmake --preset Release",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Build (Debug)",
+      "type": "shell",
+      "command": "cmake --build --preset Debug",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Configure (Debug)"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Build (Release)",
+      "type": "shell",
+      "command": "cmake --build --preset Release",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Configure (Release)"
+      ],
+      "group": "build",
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Rebuild (clean-first)",
+      "type": "shell",
+      "command": "cmake --build --preset Debug --clean-first",
+      "group": "build",
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Clean (Debug)",
+      "type": "shell",
+      "command": "cmake --build --preset Debug --target clean",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Flash (OpenOCD)",
+      "type": "shell",
+      "command": "cmake --build --preset Debug --target flash",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Disassemble (.asm)",
+      "type": "shell",
+      "command": "cmake --build --preset Debug --target disasm",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "MCU: Sync from mcu.json",
+      "type": "shell",
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File ${workspaceFolder}/scripts/sync-mcu.ps1",
+      "windows": {
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File ${workspaceFolder}/scripts/sync-mcu.ps1"
+      },
+      "linux": {
+        "command": "bash ${workspaceFolder}/scripts/sync-mcu.sh"
+      },
+      "osx": {
+        "command": "bash ${workspaceFolder}/scripts/sync-mcu.sh"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

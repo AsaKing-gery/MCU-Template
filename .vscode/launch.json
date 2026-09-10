@@ -1,0 +1,57 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // 默认调试配置：ST-Link + OpenOCD。
+      // device / svdFile / configFiles 由 mcu.json 驱动，改完 mcu.json 后运行
+      // “MCU: Sync from mcu.json” 任务即可，不用手动改这个文件。
+      "name": "Debug (OpenOCD / ST-Link)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/${workspaceFolderBasename}.elf",
+      "servertype": "openocd",
+      "device": "STM32F407VG",
+      "svdFile": "${workspaceFolder}/.svd/STM32F407.svd",
+      "configFiles": [
+        "interface/stlink.cfg",
+        "target/stm32f4x.cfg"
+      ],
+      "openOCDLaunchCommands": [
+        "adapter speed 4000"
+      ],
+      "runToEntryPoint": "main",
+      "showDevDebugOutput": "none",
+      "preLaunchTask": "Build (Debug)"
+    },
+    {
+      // J-Link 用户用这一条。device 与 OpenOCD 的 target 都需要在 mcu.json 里配好。
+      "name": "Debug (J-Link)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/${workspaceFolderBasename}.elf",
+      "servertype": "jlink",
+      "device": "STM32F407VG",
+      "interface": "swd",
+      "svdFile": "${workspaceFolder}/.svd/STM32F407.svd",
+      "runToEntryPoint": "main",
+      "preLaunchTask": "Build (Debug)"
+    },
+    {
+      // 附加到已运行的目标，不复位、不下载，用于观察现场
+      "name": "Attach (OpenOCD)",
+      "type": "cortex-debug",
+      "request": "attach",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/${workspaceFolderBasename}.elf",
+      "servertype": "openocd",
+      "device": "STM32F407VG",
+      "svdFile": "${workspaceFolder}/.svd/STM32F407.svd",
+      "configFiles": [
+        "interface/stlink.cfg",
+        "target/stm32f4x.cfg"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  // ───────── CMake ─────────
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": false,
+  "cmake.sourceDirectory": "${workspaceFolder}",
+
+  // ───────── clangd：代码补全 / 跳转 / 诊断 ─────────
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**/arm-none-eabi-*",
+    "--header-insertion=never",
+    "--completion-style=detailed",
+    "--pch-storage=memory",
+    "--all-scopes-completion"
+  ],
+  "clangd.checkUpdates": false,
+  "clangd.onConfigChanged": "restart",
+  // 首次编译前 compile_commands.json 还不存在，用兜底参数保证补全可用
+  "clangd.fallbackFlags": [
+    "-mcpu=cortex-m4",
+    "-mthumb",
+    "-mfloat-abi=hard",
+    "-mfpu=fpv4-sp-d16",
+    "-std=gnu17"
+  ],
+
+  // ───────── 关掉 Microsoft C/C++ 的 IntelliSense，避免和 clangd 打架 ─────────
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.errorSquiggles": "disabled",
+  "C_Cpp.autocomplete": "disabled",
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+
+  // ───────── 文件关联与显示 ─────────
+  // 注：CubeMX 生成的启动文件是小写 .s；Windows 文件系统大小写不敏感，
+  //     这里只保留一条 `*.s` 即可，避免出现大小写重复的键。
+  "files.associations": {
+    "*.ld": "linkerscript",
+    "*.s": "arm",
+    "*.h": "c"
+  },
+  "files.eol": "\n",
+  "files.exclude": {
+    "**/build": true
+  },
+  "search.exclude": {
+    "**/build": true
+  },
+
+  "editor.formatOnSave": false,
+  "[c]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "terminal.integrated.defaultProfile.windows": "PowerShell"
+}

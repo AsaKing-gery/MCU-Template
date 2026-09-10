@@ -1,0 +1,28 @@
+# clangd 配置。路径均相对本文件所在目录（即工程根目录）。
+#
+# CompilationDatabase 指向 compile_commands.json 所在目录。
+# 默认使用 Debug 预设；若长期只用 Release，把下面一行改成 build/Release。
+CompileFlags:
+  CompilationDatabase: build/Debug
+  # 让 clangd 调用 arm-none-eabi-gcc 来获取交叉编译器的内建头文件路径
+  Compiler: arm-none-eabi-gcc
+  Add:
+    - -ferror-limit=0
+    - -Wno-unknown-warning-option
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None
+
+Hover:
+  ShowAKA: true
+
+InlayHints:
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true
+  Designators: true
+
+Completion:
+  AllScopes: true
+  HeaderInsertion: Never
