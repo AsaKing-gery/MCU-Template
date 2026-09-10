@@ -27,6 +27,15 @@ message(STATUS "  linker script : ${MCU_LDSCRIPT_FILE}")
 message(STATUS "  defines       : ${MCU_DEFINES_LIST}")
 message(STATUS "───────────────────────────────────────────────")
 
+# 链接脚本缺失不是致命错误（先 configure 再让 CubeMX 生成代码是常见顺序），
+# 但要明确提示，否则最后会在链接阶段报一堆莫名其妙的错误。
+if(NOT MCU_LDSCRIPT_FILE OR MCU_LDSCRIPT_FILE MATCHES "-NOTFOUND$")
+  message(WARNING
+    "在工程中找不到链接脚本 \"${MCU_LDSCRIPT}\"。\n"
+    "  * 已经用 CubeMX 生成过代码：把 .ld 放到工程根目录，或改 mcu.json 的 linkerScript\n"
+    "  * 还没生成：忽略本警告，生成后再重新 configure")
+endif()
+
 # -----------------------------------------------------------------------------
 # 1. 收集源文件
 #    想新增源码目录时，只改下面这一行
@@ -58,6 +67,11 @@ list(LENGTH _sources _n_sources)
 message(STATUS "源文件数量：${_n_sources}")
 
 add_executable(${PROJECT_NAME} ${_sources})
+
+# 裸机工程（CMAKE_SYSTEM_NAME = Generic）默认的可执行文件后缀是空的，
+# 产物会叫 "<项目名>" 而不是 "<项目名>.elf"。
+# 而 launch.json / 调试器都按 .elf 找文件，这里统一补上后缀。
+set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".elf")
 
 # -----------------------------------------------------------------------------
 # 2. 头文件目录：自动收集 Core/Drivers/App 下名为 Inc / Include / Legacy 的目录
@@ -142,19 +156,80 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 # -----------------------------------------------------------------------------
 find_program(OPENOCD_EXECUTABLE NAMES openocd)
 
+# CubeIDE / CubeCLT 自带的 OpenOCD 不在 PATH 里，找不到时自动探测一下
+if(NOT OPENOCD_EXECUTABLE AND CMAKE_HOST_WIN32)
+  set(_openocd_patterns
+    "C:/ST/STM32CubeCLT_*/OpenOCD/bin/openocd.exe"
+    "C:/ST/STM32CubeIDE_*/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.openocd.*/tools/bin/openocd.exe"
+    "C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.openocd.*/tools/bin/openocd.exe"
+  )
+  file(GLOB _openocd_candidates ${_openocd_patterns})
+  if(_openocd_candidates)
+    list(SORT _openocd_candidates ORDER DESCENDING)
+  endif()
+  foreach(_cand IN LISTS _openocd_candidates)
+    if(EXISTS "${_cand}")
+      set(OPENOCD_EXECUTABLE "${_cand}")
+      break()
+    endif()
+  endforeach()
+endif()
+
+# ST 版 OpenOCD 需要显式指定脚本目录，否则报 Can't find interface/stlink.cfg
+# （脚本在 com.st.stm32cube.ide.mcu.debug.openocd 插件里，不在 OpenOCD 自己的目录下）
+set(OPENOCD_SCRIPTS_DIR "")
+if(OPENOCD_EXECUTABLE)
+  get_filename_component(_openocd_dir "${OPENOCD_EXECUTABLE}" DIRECTORY)
+
+  # 标准发行版（xPack 等）的脚本在 openocd 同级或上一层
+  foreach(_guess "${_openocd_dir}/scripts" "${_openocd_dir}/../share/openocd/scripts")
+    if(EXISTS "${_guess}/interface/stlink.cfg")
+      set(OPENOCD_SCRIPTS_DIR "${_guess}")
+      break()
+    endif()
+  endforeach()
+
+  # CubeIDE 自带的脚本位置
+  if(NOT OPENOCD_SCRIPTS_DIR)
+    file(GLOB _ocd_script_candidates
+      "C:/ST/STM32CubeIDE_*/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.debug.openocd_*/resources/openocd/st_scripts"
+      "C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.debug.openocd_*/resources/openocd/st_scripts"
+      "C:/ST/STM32CubeCLT_*/OpenOCD/share/openocd/scripts")
+    if(_ocd_script_candidates)
+      list(SORT _ocd_script_candidates ORDER DESCENDING)
+    endif()
+    foreach(_cand IN LISTS _ocd_script_candidates)
+      if(EXISTS "${_cand}/interface/stlink.cfg")
+        set(OPENOCD_SCRIPTS_DIR "${_cand}")
+        break()
+      endif()
+    endforeach()
+  endif()
+endif()
+
 if(OPENOCD_EXECUTABLE)
   message(STATUS "OpenOCD       : ${OPENOCD_EXECUTABLE}")
+  if(OPENOCD_SCRIPTS_DIR)
+    message(STATUS "OpenOCD scripts: ${OPENOCD_SCRIPTS_DIR}")
+  endif()
+
+  set(_ocd_args "")
+  if(OPENOCD_SCRIPTS_DIR)
+    list(APPEND _ocd_args -s "${OPENOCD_SCRIPTS_DIR}")
+  endif()
+  list(APPEND _ocd_args
+    -f "interface/stlink.cfg"
+    -f "${MCU_OPENOCD}"
+    -c "adapter speed 4000"
+    -c "program $<TARGET_FILE:${PROJECT_NAME}> verify reset exit")
+
   add_custom_target(flash
-    COMMAND "${OPENOCD_EXECUTABLE}"
-            -f "interface/stlink.cfg"
-            -f "${MCU_OPENOCD}"
-            -c "adapter speed 4000"
-            -c "program $<TARGET_FILE:${PROJECT_NAME}> verify reset exit"
+    COMMAND "${OPENOCD_EXECUTABLE}" ${_ocd_args}
     DEPENDS ${PROJECT_NAME}
     COMMENT "使用 OpenOCD 烧录 ${PROJECT_NAME}.elf"
     VERBATIM)
 else()
-  message(STATUS "OpenOCD       : 未找到（flash 目标不可用时请用调试面板的下载按钮）")
+  message(STATUS "OpenOCD       : 未找到（请用 VSCode 调试面板的下载按钮，或把 openocd 加入 PATH）")
   add_custom_target(flash
     COMMAND ${CMAKE_COMMAND} -E echo
             "未找到 openocd。请安装 OpenOCD 并加入 PATH，或直接用 VSCode 调试面板烧录。"

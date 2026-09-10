@@ -36,6 +36,7 @@ MCU-Template/
 │   ├── gcc-arm-none-eabi.cmake 工具链文件，自动解析 mcu.json
 │   └── disasm.cmake             反汇编辅助脚本（供给 disasm 目标调用）
 ├── scripts/
+│   ├── setup-env.ps1           ★ 一次性配置 Windows 用户环境变量（PATH / OPENOCD_SCRIPTS）
 │   ├── new-project.ps1         ★ 一键建工程 / 把模板应用到已有工程（Windows）
 │   ├── new-project.sh          同上（Linux / macOS）
 │   ├── sync-mcu.ps1            mcu.json → launch.json 同步
@@ -57,11 +58,51 @@ MCU-Template/
 
 | 组件 | 版本 / 说明 | 检查命令 |
 |---|---|---|
-| **CMake** | ≥ 3.22（`string(JSON)` / Presets 需要） | `cmake --version` |
-| **Ninja** | 任意版本，构建后端 | `ninja --version` |
-| **Arm GNU Toolchain** | `arm-none-eabi-*`，或直接用 STM32CubeCLT 里自带的 | `arm-none-eabi-gcc --version` |
-| **OpenOCD** | 烧录 / 调试（用 J-Link 可跳过） | `openocd --version` |
+| **CMake** | ≥ 3.22（`string(JSON)` / Presets 需要）。装了 VS 的话它自带的也能用 | `cmake --version` |
+| **Ninja** | 构建后端。装了 VS 也一样自带 | `ninja --version` |
+| **Arm GNU Toolchain** | `arm-none-eabi-*`。装过 STM32CubeIDE / CubeCLT 就不用另外装，模板会自动找到 | `arm-none-eabi-gcc --version` |
+| **OpenOCD** | 烧录 / 调试用（用 J-Link 可跳过）。CubeIDE 自带的也能自动找到 | `openocd --version` |
 | **STM32CubeMX** | 生成初始化代码（可只用一次） | — |
+
+### 一键配置环境（Windows，推荐先跑这个）
+
+`cmake` / `ninja` / `openocd` 经常装了却不在 `PATH` 里（尤其是 VS 自带的 cmake 和 ninja），
+而 `tasks.json` 里的任务是在**普通终端**里跑的，会报"找不到 ninja"。
+
+跑一次这个脚本就全好了 —— 它自动探测、备份、写环境变量：
+
+```powershell
+# 先看会改什么，不实际写入
+powershell -ExecutionPolicy Bypass -File scripts/setup-env.ps1 -DryRun
+
+# 确认后执行
+powershell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
+```
+
+输出示例：
+
+```
+== Looking for cmake / ninja / openocd ==
+  cmake   : will add   C:\Program Files\Microsoft Visual Studio\18\Community\...\CMake\CMake\bin
+  ninja   : will add   C:\Program Files\Microsoft Visual Studio\18\Community\...\CMake\Ninja
+  openocd : will add   C:\ST\STM32CubeIDE_2.0.0\...\externaltools.openocd.../tools/bin
+  scripts : C:\ST\STM32CubeIDE_2.0.0\...\mcu.debug.openocd_.../resources/openocd/st_scripts
+```
+
+它做的事：
+
+1. 查找 `cmake` / `ninja` / `openocd`（先看现有 `PATH`，再找 VS 和 CubeIDE 的常见安装位置）
+2. 把缺的目录加进**用户** `PATH`
+3. 设置用户变量 `OPENOCD_SCRIPTS`（ST 版 OpenOCD 必须，否则报 `Can't find interface/stlink.cfg`）
+4. 改之前备份到 `%USERPROFILE%\.mcu-template-backup\`
+
+> ⚠️ 脚本**故意不用 `setx PATH`**：`setx` 有 1024 字符截断限制，`PATH` 一长就会**被砍掉一半**。
+> 它用的是 .NET API，没有这个限制，并且写回前会检查"新值不能比旧值短"。
+>
+> ⚠️ 工具链（`arm-none-eabi-gcc`）**故意不加进 PATH**：CMake 工具链文件会自己探测
+> CubeIDE / CubeCLT / Arm 的位置，这样 CubeIDE 升级后也不会失效。
+
+**改完必须重启 VSCode（所有窗口）+ 开新终端**才会生效。
 
 **VSCode 扩展**（打开工程时会自动提示，见 `.vscode/extensions.json`）：
 
@@ -73,17 +114,69 @@ MCU-Template/
 
 ### 工具链路径怎么找
 
-模板按以下顺序查找 `arm-none-eabi-gcc`：
+模板按以下顺序查找 `arm-none-eabi-gcc`，**装过 STM32CubeIDE 的话通常第 3 步就自动命中了，什么都不用配**：
 
 1. 环境变量 `ARM_GCC_PATH`（指向工具链**根目录**，其下有 `bin/`）
 2. 系统 `PATH`
+3. 自动探测常见安装位置：
+   - `C:/ST/STM32CubeCLT_*/GNU-tools-for-STM32/bin`
+   - `C:/ST/STM32CubeIDE_*/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.*/tools/bin`
+   - `C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeIDE/plugins/...`
+   - `C:/Program Files/Arm/GNU Toolchain*/bin`
+   - Linux / macOS 对应路径
+
+configure 时会打印实际用了哪一个：
+
+```
+-- 工具链来源：自动探测 -> C:/ST/STM32CubeIDE_2.0.0/.../tools/bin
+```
+
+想强制指定（比如同时装了多个版本）：
 
 ```powershell
-# 如果没加进 PATH，设置一次即可（新开终端生效）
 setx ARM_GCC_PATH "C:\Program Files\Arm\GNU Toolchain mingw-w64-x86_64-arm-none-eabi"
-# 或用 CubeCLT 自带的
-setx ARM_GCC_PATH "C:\ST\STM32CubeCLT_1.16.0\GNU-tools-for-STM32"
+# 或 CubeCLT 自带的
+setx ARM_GCC_PATH "C:\ST\STM32CubeCLT_1.17.0\GNU-tools-for-STM32"
 ```
+
+> CubeIDE 的插件目录名里带版本号，**CubeIDE 升级后路径会变**。模板用的是通配符匹配，
+> 所以升级后自动还是能找到；但你手动设过 `ARM_GCC_PATH` 的话需要重新设置。
+
+### OpenOCD 从哪来
+
+**CubeIDE 自带的 OpenOCD 需要额外的脚本目录**，否则报 `Can't find interface/stlink.cfg`——
+它的脚本在另一个插件里（`com.st.stm32cube.ide.mcu.debug.openocd_*/resources/openocd/st_scripts`），
+不在 OpenOCD 自己的目录下。
+
+两种解决办法：
+
+**① 用 `OPENOCD_SCRIPTS` 环境变量（推荐，`setup-env.ps1` 会自动设好）**
+
+OpenOCD 认这个环境变量，把它加进脚本搜索路径。设好之后：
+
+- `flash` 目标直接能用
+- **F5 调试也直接能用**，`launch.json` 一个字都不用改，模板保持通用
+
+```powershell
+[Environment]::SetEnvironmentVariable(
+    'OPENOCD_SCRIPTS',
+    'C:\ST\STM32CubeIDE_2.0.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.debug.openocd_2.3.200.202510310951\resources\openocd\st_scripts',
+    'User')
+```
+
+> 注意：`flash` 目标**不依赖**这个环境变量，它自己会探测并显式传 `-s`。
+> 所以即使忘了设，命令行烧录也是好的——只有 F5 需要它。
+
+**② 在 `launch.json` 里写死路径（不依赖环境变量，但跟机器绑定）**
+
+```jsonc
+"openocdPath": "C:/ST/STM32CubeIDE_2.0.0/.../externaltools.openocd.win32_2.4.300.202509300731/tools/bin/openocd.exe",
+"searchDir":   ["C:/ST/STM32CubeIDE_2.0.0/.../com.st.stm32cube.ide.mcu.debug.openocd_2.3.200.202510310951/resources/openocd/st_scripts"],
+```
+
+**③ 或者干脆装独立的 [xPack OpenOCD](https://github.com/xpack-dev-tools/openocd-xpack/releases)**
+
+它自带 `share/openocd/scripts`，解压后把 `bin` 加进 `PATH` 即可，①②都不用做，也不会被 CubeIDE 升级影响。
 
 ---
 
@@ -274,11 +367,27 @@ cmake --preset Debug -DMCU_USE_PRINTF_FLOAT=ON
 ## 九、常见问题
 
 **Q：报错"未找到 arm-none-eabi-gcc"**
-装 Arm GNU Toolchain 或 STM32CubeCLT，加入 `PATH`，或设置环境变量 `ARM_GCC_PATH`。
+模板会自动探测 CubeCLT / CubeIDE / Arm 官方包的常见安装位置。
+三个都试过还是没有，就按报错信息里的提示设一次 `ARM_GCC_PATH`（新开终端生效）：
+
+```powershell
+setx ARM_GCC_PATH "C:\ST\STM32CubeIDE_2.0.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.<版本>.win32_<版本>\tools"
+```
+
+然后重新 configure：`cmake --preset Debug --fresh`（VSCode 里跑 `Rebuild (clean-first)`）。
 
 **Q：clangd 满屏红波浪线，找不到 `stm32f4xx.h`**
-先**构建一次**（`Ctrl+Shift+B`）生成 `build/Debug/compile_commands.json`。
-还有问题就在 `settings.json` 里确认 `--query-driver=**/arm-none-eabi-*` 能匹配到你的编译器绝对路径。
+clangd 靠 `build/Debug/compile_commands.json` 工作，**它必须先 configure 成功一次**才会生成。
+所以顺序是：工具链配好 → `Ctrl+Shift+B` 构建一次 → clangd 才正常。
+
+按这个顺序检查：
+
+1. `build/Debug/compile_commands.json` 存在吗？没有就先构建。
+2. `Ctrl+Shift+P` → `clangd: Restart language server`。
+3. `settings.json` 里 `clangd.arguments` 的 `--query-driver=**/arm-none-eabi-*` 要能匹配到你的编译器
+   **绝对路径**（CubeIDE 自带的路径里含 `arm-none-eabi-`，能匹配上）。
+4. 看 `Ctrl+Shift+U`（输出面板）选 `clangd` 有没有报错。
+5. `.clangd` 里的 `CompilationDatabase: build/Debug` 要和实际输出目录一致（换 Release 时记得改）。
 
 **Q：CubeMX 重新生成后 `CMakeLists.txt` 被覆盖了**
 CubeMX 选 `CMake` toolchain 时确实会覆盖。重新执行一次
@@ -292,8 +401,21 @@ CubeMX 选 `CMake` toolchain 时确实会覆盖。重新执行一次
 `.ld` 不在工程根目录（模板也会在根目录、`Core/`、`ld/`、`LinkerScript/` 里找）。
 把文件放对位置，或修改 `mcu.json` 的 `linkerScript`。
 
-**Q：找不到 `ninja`**
-`pip install ninja`，或装 STM32CubeCLT（自带 ninja 与 cmake）。
+**Q：找不到 `ninja` / `cmake` / `openocd`**
+先跑一次 `scripts/setup-env.ps1`，它会自动找到并加进用户 `PATH`。
+
+装 VS 的用户注意：VS 自带 cmake 和 ninja，但**不在 `PATH` 里**。
+CMake Tools 扩展自己会找到它们，所以侧边栏能构建；但 `tasks.json` 里的任务是在普通终端跑的，会报找不到。
+
+如果非想手动加，**不要用 `setx PATH "%PATH%;..."`** —— `setx` 会在 1024 字符处截断，
+`PATH` 长一点就会被砍掉一半。用：
+
+```powershell
+$p = [Environment]::GetEnvironmentVariable('Path','User')
+[Environment]::SetEnvironmentVariable('Path', "$p;C:\你的\ninja\目录", 'User')
+```
+
+改完要**重启 VSCode + 开新终端**。
 
 **Q：改了 `mcu.json` 但调试时 device 没变**
 `launch.json` 需要同步：运行任务 `MCU: Sync from mcu.json`。
@@ -303,7 +425,30 @@ CMake 侧改了 `-mcpu` / `-mfpu` 后要重新 configure（`Rebuild (clean-first
 打开 `MCU_USE_PRINTF_FLOAT`（见上一节），会增大固件体积。
 
 **Q：`flash` 任务提示找不到 openocd**
-装 OpenOCD 并加入 `PATH`；或直接用 F5 调试（Cortex-Debug 会自己调 OpenOCD）。
+`flash` 目标会自动探测 CubeIDE 自带的 OpenOCD，所以正常情况不用配。
+实在找不到（没装 CubeIDE）就装一个 xPack OpenOCD。
+
+**Q：F5 调试报 `Can't find interface/stlink.cfg`**
+CubeIDE 自带 OpenOCD 的脚本在**另一个插件**里，需要告诉它。最省事的是设一次环境变量
+（`scripts/setup-env.ps1` 会自动配好）：
+
+```powershell
+[Environment]::SetEnvironmentVariable('OPENOCD_SCRIPTS', '<st_scripts 目录>', 'User')
+```
+
+详见「OpenOCD 从哪来」一节。
+
+**Q：F5 报 `openocd` 找不到**
+CubeIDE 自带的不在 `PATH` 里。跑 `scripts/setup-env.ps1`，或手动把它的 `bin` 加进用户 `PATH`。
+
+**Q：`flash` 任务报 `embedded:startup.tcl:1520: Error: Infinite eval recursion`**
+这是 ST 版 OpenOCD 的报错 bug：它真正想说的是"没连上 ST-Link"（`exit` 在 `init` 之前非法，
+它在报这个错时自己递归了）。插上调试器再试；或者用 F5 下载——Cortex-Debug 不走这条路径。
+
+**Q：装了 ST 官方的 STM32 VS Code Extension 扩展包，会不会冲突**
+`stmicroelectronics.stm32cube-ide-*` 系列自带 clangd 与 CMake 构建集成，和本模板的
+`vscode-clangd` + `cmake-tools` 是两套并行方案，可能抢同一块地方。建议二选一：
+用本模板时把 ST 那一套禁掉（只留它的 `-debug-stlink-gdbserver` 也行）。
 
 ---
 

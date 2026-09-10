@@ -54,12 +54,30 @@ string(JSON MCU_LDSCRIPT  GET "${_mcu_raw}" linkerScript)
 string(JSON MCU_SVD       GET "${_mcu_raw}" svd)
 string(JSON MCU_OPENOCD   GET "${_mcu_raw}" openocdTarget)
 
-# defines 可能是 JSON 数组，也可能被写成 "A B C" 字符串，两种都兼容
-string(JSON MCU_DEFINES ERROR_VARIABLE _defines_err GET "${_mcu_raw}" defines)
-if(_defines_err)
-  set(MCU_DEFINES "")
+# defines 应该是 JSON 数组：[ "USE_HAL_DRIVER", "STM32F407xx" ]
+#
+# 注意：string(JSON ... GET ...) 取数组时返回的是 CMake 内部形式 "[;a,;b;]"，
+# 直接拿去当编译选项会变成 -D[;a,;b;]，所以必须用下标逐个成员取出来。
+set(MCU_DEFINES_LIST "")
+
+# 能取到下标 0 就说明是（非空）数组
+string(JSON _probe ERROR_VARIABLE _def_not_array GET "${_mcu_raw}" defines 0)
+
+if(NOT _def_not_array)
+  string(JSON _def_count LENGTH "${_mcu_raw}" defines)
+  math(EXPR _def_last "${_def_count} - 1")
+  foreach(_i RANGE 0 ${_def_last})
+    string(JSON _def GET "${_mcu_raw}" defines ${_i})
+    list(APPEND MCU_DEFINES_LIST "${_def}")
+  endforeach()
+else()
+  # 兼容写成 "DEF1 DEF2" 字符串的情况；空数组 [] 会取到 "[;;]"，用正则挡掉
+  string(JSON _def_raw ERROR_VARIABLE _def_err GET "${_mcu_raw}" defines)
+  if(NOT _def_err AND _def_raw MATCHES "^[A-Za-z0-9_ ]+$")
+    separate_arguments(_def_words UNIX_COMMAND "${_def_raw}")
+    list(APPEND MCU_DEFINES_LIST ${_def_words})
+  endif()
 endif()
-separate_arguments(MCU_DEFINES_LIST UNIX_COMMAND "${MCU_DEFINES}")
 
 # 导出为 cache 变量，保证 CMakeLists.txt 里一定能读到。
 # 必须带 FORCE：mcu.json 是唯一事实来源，重新 configure 时要让新值覆盖旧缓存。
@@ -90,6 +108,7 @@ string(REPLACE ";" " " _arch_flags_str "${_arch_flags}")
 
 # -----------------------------------------------------------------------------
 # 3. 定位 arm-none-eabi-* 可执行文件
+#    优先级：ARM_GCC_PATH 环境变量 > 系统 PATH > 自动探测常见安装位置
 # -----------------------------------------------------------------------------
 if(CMAKE_HOST_WIN32)
   set(_exe_suffix ".exe")
@@ -97,20 +116,67 @@ else()
   set(_exe_suffix "")
 endif()
 
+set(ARM_GCC_BIN "")
+
+# 3.1 环境变量 ARM_GCC_PATH（指向工具链根目录，其下应有 bin/）
 if(DEFINED ENV{ARM_GCC_PATH} AND NOT "$ENV{ARM_GCC_PATH}" STREQUAL "")
   set(ARM_GCC_BIN "$ENV{ARM_GCC_PATH}/bin")
   message(STATUS "工具链来源：环境变量 ARM_GCC_PATH = $ENV{ARM_GCC_PATH}")
-else()
+endif()
+
+# 3.2 系统 PATH 中的 arm-none-eabi-gcc
+if(NOT ARM_GCC_BIN)
   find_program(ARM_GCC_PROGRAM arm-none-eabi-gcc)
-  if(NOT ARM_GCC_PROGRAM)
-    message(FATAL_ERROR
-      "未找到 arm-none-eabi-gcc。\n"
-      "  1) 安装 Arm GNU Toolchain（或使用 STM32CubeCLT 自带的工具链）\n"
-      "  2) 把它的 bin 目录加入 PATH，或设置环境变量 ARM_GCC_PATH 指向工具链根目录\n"
-      "     例如：setx ARM_GCC_PATH \"C:/Program Files/Arm/GNU Toolchain mingw-w64-x86_64-arm-none-eabi\"")
+  if(ARM_GCC_PROGRAM)
+    get_filename_component(ARM_GCC_BIN "${ARM_GCC_PROGRAM}" DIRECTORY)
+    message(STATUS "工具链来源：PATH -> ${ARM_GCC_BIN}")
   endif()
-  get_filename_component(ARM_GCC_BIN "${ARM_GCC_PROGRAM}" DIRECTORY)
-  message(STATUS "工具链来源：PATH -> ${ARM_GCC_BIN}")
+endif()
+
+# 3.3 自动探测：STM32CubeCLT / STM32CubeIDE / Arm 官方包
+#     CubeIDE 的插件目录名带版本号（升级后会变），所以用通配符匹配，再按名称倒序取最新。
+if(NOT ARM_GCC_BIN)
+  set(_gcc_patterns
+    "C:/ST/STM32CubeCLT_*/GNU-tools-for-STM32/bin"
+    "C:/ST/STM32CubeCLT_*/GNU-tools-for-Stm32*/bin"
+    "C:/ST/STM32CubeIDE_*/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.*/tools/bin"
+    "C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.*/tools/bin"
+    "C:/Program Files (x86)/STMicroelectronics/STM32Cube/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.*/tools/bin"
+    "C:/Program Files/Arm/GNU Toolchain*/bin"
+    "C:/Program Files (x86)/Arm/GNU Toolchain*/bin"
+  )
+
+  if(NOT CMAKE_HOST_WIN32)
+    list(APPEND _gcc_patterns
+      "/opt/ST/STM32CubeCLT_*/GNU-tools-for-STM32/bin"
+      "/opt/st/stm32cubeclt_*/GNU-tools-for-STM32/bin"
+      "/Applications/STM32CubeIDE.app/Contents/Eclipse/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.*/tools/bin"
+    )
+  endif()
+
+  file(GLOB _gcc_candidates ${_gcc_patterns})
+  if(_gcc_candidates)
+    list(SORT _gcc_candidates ORDER DESCENDING)
+  endif()
+
+  foreach(_cand IN LISTS _gcc_candidates)
+    if(EXISTS "${_cand}/arm-none-eabi-gcc${_exe_suffix}")
+      set(ARM_GCC_BIN "${_cand}")
+      message(STATUS "工具链来源：自动探测 -> ${_cand}")
+      break()
+    endif()
+  endforeach()
+endif()
+
+# 3.4 都没有就报错，并把解决办法写清楚
+if(NOT ARM_GCC_BIN OR NOT EXISTS "${ARM_GCC_BIN}/arm-none-eabi-gcc${_exe_suffix}")
+  message(FATAL_ERROR
+    "未找到 arm-none-eabi-gcc。\n"
+    "  1) 最简单：CubeIDE 用户直接设一次环境变量（新开终端生效）\n"
+    "         setx ARM_GCC_PATH \"C:/ST/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.<版本>.win32_<版本>/tools\"\n"
+    "     注意：CubeIDE 升级后插件目录名里的版本号会变，需要重新设置。\n"
+    "  2) 或安装独立的 STM32CubeCLT（路径稳定） / Arm GNU Toolchain，并把 bin 加入 PATH。\n"
+    "  3) 装好后重新 configure：cmake --preset Debug --fresh")
 endif()
 
 set(CMAKE_C_COMPILER    "${ARM_GCC_BIN}/arm-none-eabi-gcc${_exe_suffix}")
@@ -129,11 +195,8 @@ find_file(MCU_LDSCRIPT_FILE
   PATHS "${_proj_root}" "${_proj_root}/Core" "${_proj_root}/ld" "${_proj_root}/LinkerScript"
   NO_DEFAULT_PATH)
 
-if(NOT MCU_LDSCRIPT_FILE)
-  message(WARNING
-    "在工程中找不到链接脚本 \"${MCU_LDSCRIPT}\"。\n"
-    "请检查 mcu.json 的 linkerScript 字段，或先用 STM32CubeMX 生成代码。")
-endif()
+# 这里只记录结果，不提示。工具链文件会被 project() / try_compile 反复 include，
+# 提示放在只执行一次的 CMakeLists.txt 里，避免同样的警告刷好几遍。
 set(MCU_LDSCRIPT_FILE "${MCU_LDSCRIPT_FILE}" CACHE FILEPATH "链接脚本绝对路径" FORCE)
 
 # -----------------------------------------------------------------------------
