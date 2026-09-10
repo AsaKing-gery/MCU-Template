@@ -158,12 +158,37 @@ if ($openocdDir) {
 }
 
 # -----------------------------------------------------------------------------
+# 4b. arm-none-eabi-gcc
+#
+# CMake does NOT need this on PATH (the toolchain file locates the compiler
+# itself), but clangd DOES:
+#
+#   clangd resolves the compiler given to --query-driver by NAME through PATH.
+#   If it cannot find it, clangd never learns where the cross toolchain's own
+#   headers live (stdio.h / math.h / stdint.h from newlib), so every
+#   #include <...> turns into "file not found" and the editor fills up with
+#   hundreds of bogus errors -- while the command line build stays perfectly
+#   green. That mismatch is very confusing, so we put it on PATH after all.
+# -----------------------------------------------------------------------------
+$gccDir = Find-InPathEntries 'arm-none-eabi-gcc.exe' $allParts
+if (-not $gccDir) {
+    $cand = Find-NewestPath @(
+        'C:\ST\STM32CubeIDE_*\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.*\tools\bin'
+        'C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.*\tools\bin'
+        'C:\ST\STM32CubeCLT_*\GNU-tools-for-STM32\bin'
+        'C:\Program Files\Arm\GNU Toolchain*\bin'
+    )
+    if ($cand -and (Test-Path -LiteralPath (Join-Path $cand 'arm-none-eabi-gcc.exe'))) { $gccDir = $cand }
+}
+
+# -----------------------------------------------------------------------------
 # 5. Report + work out the diff
 # -----------------------------------------------------------------------------
 $entries = @(
     [pscustomobject]@{ Name = 'cmake';   Dir = $cmakeDir;   Exe = 'cmake.exe' }
     [pscustomobject]@{ Name = 'ninja';   Dir = $ninjaDir;   Exe = 'ninja.exe' }
     [pscustomobject]@{ Name = 'openocd'; Dir = $openocdDir; Exe = 'openocd.exe' }
+    [pscustomobject]@{ Name = 'gcc';     Dir = $gccDir;     Exe = 'arm-none-eabi-gcc.exe' }
 )
 
 $toAdd = @()
@@ -173,6 +198,7 @@ foreach ($e in $entries) {
             'cmake'   { 'install CMake, or the VS "C++ CMake tools" workload' }
             'ninja'   { 'install Ninja, e.g. "pip install ninja"' }
             'openocd' { 'only needed for flashing/debugging with OpenOCD (J-Link users can skip)' }
+            'gcc'     { 'required: CMake locates it itself, but clangd needs it on PATH to find newlib headers (stdio.h/math.h)' }
             default   { 'install it' }
         }
         Write-Info ("  {0,-8}: not found  ({1})" -f $e.Name, $hint) -Color Yellow

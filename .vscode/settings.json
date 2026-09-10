@@ -15,14 +15,14 @@
   ],
   "clangd.checkUpdates": false,
   "clangd.onConfigChanged": "restart",
-  // 首次编译前 compile_commands.json 还不存在，用兜底参数保证补全可用
-  "clangd.fallbackFlags": [
-    "-mcpu=cortex-m4",
-    "-mthumb",
-    "-mfloat-abi=hard",
-    "-mfpu=fpv4-sp-d16",
-    "-std=gnu17"
-  ],
+  // 这里刻意不写 clangd.fallbackFlags。
+  //
+  // 理由：clangd 对每个文件都是从 build/Debug/compile_commands.json 里取真实参数的
+  // （头文件会用"包含它的那个 .c"的参数），所以根本不需要兜底。
+  // 而兜底参数一旦写错（比如把 M33 工程写成 -mcpu=cortex-m4 -mfpu=fpv4-sp-d16），
+  // 反而会在第一次编译前给出"目标芯片不对"的假报错，比没有兜底更误导。
+  //
+  // 正确顺序永远是：先 Ctrl+Shift+B 构建一次 → 再让 clangd 索引。
 
   // ───────── 关掉 Microsoft C/C++ 的 IntelliSense，避免和 clangd 打架 ─────────
   "C_Cpp.intelliSenseEngine": "disabled",

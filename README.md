@@ -37,6 +37,7 @@ MCU-Template/
 │   └── disasm.cmake             反汇编辅助脚本（供给 disasm 目标调用）
 ├── scripts/
 │   ├── setup-env.ps1           ★ 一次性配置 Windows 用户环境变量（PATH / OPENOCD_SCRIPTS）
+│   ├── fix-encoding.ps1        ★ 找出（并可转换）GBK 编码的源文件——clangd 只认 UTF-8
 │   ├── new-project.ps1         ★ 一键建工程 / 把模板应用到已有工程（Windows）
 │   ├── new-project.sh          同上（Linux / macOS）
 │   ├── sync-mcu.ps1            mcu.json → launch.json 同步
@@ -404,18 +405,80 @@ setx ARM_GCC_PATH "C:\ST\STM32CubeIDE_2.0.0\STM32CubeIDE\plugins\com.st.stm32cub
 
 然后重新 configure：`cmake --preset Debug --fresh`（VSCode 里跑 `Rebuild (clean-first)`）。
 
-**Q：clangd 满屏红波浪线，找不到 `stm32f4xx.h`**
-clangd 靠 `build/Debug/compile_commands.json` 工作，**它必须先 configure 成功一次**才会生成。
-所以顺序是：工具链配好 → `Ctrl+Shift+B` 构建一次 → clangd 才正常。
+**Q：代码能编译成功，但编辑器里还是满屏红波浪线**
 
-按这个顺序检查：
+先记住一件事：**构建用 `arm-none-eabi-gcc`，编辑器用 clangd（clang）—— 两套完全独立的分析。**
+"编译过了"不等于"clangd 没意见"。
 
-1. `build/Debug/compile_commands.json` 存在吗？没有就先构建。
-2. `Ctrl+Shift+P` → `clangd: Restart language server`。
-3. `settings.json` 里 `clangd.arguments` 的 `--query-driver=**/arm-none-eabi-*` 要能匹配到你的编译器
-   **绝对路径**（CubeIDE 自带的路径里含 `arm-none-eabi-`，能匹配上）。
-4. 看 `Ctrl+Shift+U`（输出面板）选 `clangd` 有没有报错。
-5. `.clangd` 里的 `CompilationDatabase: build/Debug` 要和实际输出目录一致（换 Release 时记得改）。
+按下面三条依次排查，覆盖 99% 的情况：
+
+**① clangd 是不是拿不到工具链的路径？（最常见）**
+
+看输出面板（`Ctrl+Shift+U` → 选 `clangd`），如果有：
+
+```
+E[...] System include extraction: driver arm-none-eabi-gcc not found in PATH
+E[...] [pp_file_not_found] Line 20: in included file: 'math.h' file not found
+```
+
+说明 clangd **不认识交叉编译器的内建头文件**（`stdio.h` / `math.h` / `stdint.h` 来自 GCC 自带的 newlib）。
+`--query-driver` 是**按程序名去 PATH 里找** `arm-none-eabi-gcc` 的，PATH 里没有就拿不到。
+
+→ 跑 `scripts/setup-env.ps1`（它会把工具链 bin 也加进 PATH），然后**重启 VSCode**。
+
+> 注意：CMake **不需要**工具链在 PATH 里（工具链文件自己会找），所以"能编译"和"clangd 报错"会同时出现。
+
+**② 源文件是不是 GBK 编码？（中文 Windows 的高频坑）**
+
+```
+E[...] File has invalid UTF-8 near offset 3: 092F2FB2E2CAD40D
+                                       ↑ B2E2CAD4 = GBK 的"测试"
+```
+
+- **GCC 不看编码**：GBK 注释对它只是字节，照样编译通过
+- **clangd 强制 UTF-8**：读到非法字节就放弃整个文件 → 爆几百条错误
+
+Keil / CubeIDE 在中文 Windows 上很容易把文件存成 GBK。查一下有多少：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/fix-encoding.ps1 -ProjectRoot <工程目录>
+```
+
+确认后转换（会先备份到 `%USERPROFILE%\.mcu-template-backup\`）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/fix-encoding.ps1 -ProjectRoot <工程目录> -Apply
+```
+
+> ⚠️ 脚本会单独列出**中文出现在字符串字面量里**的文件（比如 `printf("看门狗未开启")`）。
+> 这类文件转成 UTF-8 后，**发给串口/LCD 的字节会变**，接收端也要改成 UTF-8。
+> 只出现在注释里的文件转了没有任何副作用。
+
+**③ clang 比 GCC 严格，报出的是真问题**
+
+同样一份代码，两个编译器的态度可能完全不同：
+
+| 写法 | GCC 13 | clang（clangd） | GCC 14+ |
+|---|---|---|---|
+| 调用前没声明的函数 | ⚠️ 警告 | ❌ **错误** | ❌ 错误 |
+| 不兼容的函数指针 | ⚠️ 警告 | ❌ **错误** | ⚠️ 警告 |
+
+典型的 clangd 报错：
+
+```
+call to undeclared function 'TCP_send_string';
+ISO C99 and later do not support implicit function declarations
+```
+
+**这不是误报，是 clang 提前把 GCC 以后也会报的错报出来了。** 隐式声明时编译器会假设函数返回
+`int`，在 32 位 ARM 上指针刚好也是 32 位，"碰巧能跑"—— 换个优化级别就可能崩。
+建议把这类错误修掉（补 `#include` 或加函数声明）。
+
+**其它检查项**
+
+1. `build/Debug/compile_commands.json` 存在吗？clangd 全靠它。没有就先 `Ctrl+Shift+B`。
+2. `Ctrl+Shift+P` → `clangd: Restart language server`（改了 `.clangd` / `settings.json` 后）。
+3. `.clangd` 里的 `CompilationDatabase: build/Debug` 要和实际输出目录一致（换 Release 时要改）。
 
 **Q：移动 / 重命名了工程目录，configure 报 `CMakeCache.txt directory ... is different`**
 
