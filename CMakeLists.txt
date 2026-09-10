@@ -8,9 +8,27 @@
 # =============================================================================
 cmake_minimum_required(VERSION 3.22)
 
-# 工程名 = 目录名，这样才能和 launch.json 里的 ${workspaceFolderBasename} 对上
-get_filename_component(_proj_name "${CMAKE_CURRENT_SOURCE_DIR}" NAME)
-project("${_proj_name}" LANGUAGES C ASM)
+# -----------------------------------------------------------------------------
+# 工程名 = 目录名（同时也是产物名），但必须先"消毒"。
+#
+# CMake 的 target 名字只允许 字母 / 数字 / _ / - / . / +，
+# 而真实工程目录名经常带空格和括号（比如 "JY.RFM-0A-U575(24G)"），
+# 直接拿来当 target 名会 configure 失败，所以把非法字符统一换成下划线。
+#
+# 产物名会跟着变成消毒后的名字（括号→下划线）。.vscode/launch.json 里的
+# executable 由 scripts/sync-mcu 写入同一个名字，两边永远一致。
+# -----------------------------------------------------------------------------
+get_filename_component(_dir_name "${CMAKE_CURRENT_SOURCE_DIR}" NAME)
+string(REGEX REPLACE "[^A-Za-z0-9_.+-]" "_" _proj_name "${_dir_name}")
+if(NOT _proj_name)
+  set(_proj_name "mcu_firmware")
+endif()
+
+project(${_proj_name} LANGUAGES C ASM)
+
+if(NOT _dir_name STREQUAL _proj_name)
+  message(STATUS "目录名 \"${_dir_name}\" 含 CMake 不允许的字符，工程/产物名改用 \"${_proj_name}\"")
+endif()
 
 if(NOT DEFINED MCU_CPU)
   message(FATAL_ERROR
@@ -20,6 +38,7 @@ if(NOT DEFINED MCU_CPU)
 endif()
 
 message(STATUS "── MCU 配置 ───────────────────────────────────")
+message(STATUS "  产物名        : ${PROJECT_NAME}.elf")
 message(STATUS "  device        : ${MCU_DEVICE}")
 message(STATUS "  cpu / fpu     : ${MCU_CPU} / ${MCU_FPU}")
 message(STATUS "  float-abi     : ${MCU_FLOAT_ABI}")
@@ -74,33 +93,37 @@ add_executable(${PROJECT_NAME} ${_sources})
 set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".elf")
 
 # -----------------------------------------------------------------------------
-# 2. 头文件目录：自动收集 Core/Drivers/App 下名为 Inc / Include / Legacy 的目录
-#    兼容 STM32 各系列（HAL Inc、CMSIS Include、Inc/Legacy ...）
+# 2. 头文件目录
+#
+#    按"这个目录里有没有头文件"来判断，而不是按 Inc / Include 这种固定名字去找。
+#
+#    原因：ST 的库是 Core/Inc + Drivers/.../Inc 这种规范布局，但**你自己的代码**
+#    通常不是——头文件和源文件放在同一个目录里（Protocol/、Sensor/、User/inc ...）。
+#    只认固定目录名会漏掉一大批，结果是编译器和 clangd 都找不到头文件。
 # -----------------------------------------------------------------------------
-set(_scan_dirs "")
+set(_header_globs "")
 foreach(_dir IN LISTS MCU_SOURCE_DIRS)
   if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}")
-    list(APPEND _scan_dirs "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/*")
+    list(APPEND _header_globs "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/*.h")
+    list(APPEND _header_globs "${CMAKE_CURRENT_SOURCE_DIR}/${_dir}/*.hpp")
   endif()
 endforeach()
-
-set(_all_dirs "")
-if(_scan_dirs)
-  file(GLOB_RECURSE _all_dirs LIST_DIRECTORIES true ${_scan_dirs})
-endif()
 
 set(_include_dirs "")
-foreach(_d IN LISTS _all_dirs)
-  if(IS_DIRECTORY "${_d}")
-    get_filename_component(_name "${_d}" NAME)
-    if(_name STREQUAL "Inc" OR _name STREQUAL "Include" OR _name STREQUAL "Legacy")
-      list(APPEND _include_dirs "${_d}")
-    endif()
-  endif()
-endforeach()
-list(REMOVE_DUPLICATES _include_dirs)
+if(_header_globs)
+  file(GLOB_RECURSE _headers CONFIGURE_DEPENDS ${_header_globs})
+  foreach(_h IN LISTS _headers)
+    get_filename_component(_h_dir "${_h}" DIRECTORY)
+    list(APPEND _include_dirs "${_h_dir}")
+  endforeach()
+  list(REMOVE_DUPLICATES _include_dirs)
+endif()
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${_include_dirs})
+if(_include_dirs)
+  list(LENGTH _include_dirs _n_inc)
+  message(STATUS "头文件目录：${_n_inc} 个")
+  target_include_directories(${PROJECT_NAME} PRIVATE ${_include_dirs})
+endif()
 
 # -----------------------------------------------------------------------------
 # 3. 宏定义（来自 mcu.json 的 defines）
@@ -112,7 +135,8 @@ endif()
 # -----------------------------------------------------------------------------
 # 4. 编译选项
 # -----------------------------------------------------------------------------
-option(MCU_USE_PRINTF_FLOAT "启用 newlib-nano 的浮点 printf（体积会增大）" OFF)
+# MCU_USE_PRINTF_FLOAT 由工具链文件根据 mcu.json 的 floatIo 设置（缺省 true）。
+# 单独提一行提一下，免得在这里找不到它的定义。
 
 target_compile_options(${PROJECT_NAME} PRIVATE
   # Debug / Release 分别设置，避免反复 configure 时参数重复累加
@@ -129,14 +153,34 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 
 # -----------------------------------------------------------------------------
 # 5. 链接选项
+#
+# 凡是"含工程路径"的参数都必须走 target_link_options，不能写进
+# CMAKE_EXE_LINKER_FLAGS_INIT —— 后者是按空格拆分的字符串，
+# 工程路径里一有空格（"E:/keil5 project/..."）就会被拆坏。
 # -----------------------------------------------------------------------------
 target_link_options(${PROJECT_NAME} PRIVATE
   "-Wl,-Map=$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.map"
 )
 
+# 链接脚本（-T）；每个元素是独立参数，路径含空格也没问题
+if(MCU_LDSCRIPT_FILE AND NOT MCU_LDSCRIPT_FILE MATCHES "-NOTFOUND$")
+  target_link_options(${PROJECT_NAME} PRIVATE "-T${MCU_LDSCRIPT_FILE}")
+endif()
+
+# libm：sinf/cosf/sqrtf 这类数学函数不是 GCC 默认链接的，必须显式加。
+# 没有引用时链接器不会从库里取任何东西，所以加着没有副作用。
+target_link_options(${PROJECT_NAME} PRIVATE "-lm")
+
 if(MCU_USE_PRINTF_FLOAT)
-  # 写成两个参数，避免拼接形式在不同 ld 版本上行为不一致
-  target_link_options(${PROJECT_NAME} PRIVATE "-u" "_printf_float")
+  # newlib-nano 默认不带浮点版 stdio，必须显式要求把实现链接进来。
+  #
+  # 这里用 -Wl,--undefined=<符号> 而不用 "-u" "<符号>"：
+  # CMake 会对 target_link_options 里的重复项去重，"-u _printf_float -u _scanf_float"
+  # 里的第二个 "-u" 会被删掉，结果 _scanf_float 被当成输入文件报
+  # "cannot find _scanf_float"。写成两个不同的长选项就没这个问题。
+  target_link_options(${PROJECT_NAME} PRIVATE
+    "-Wl,--undefined=_printf_float"
+    "-Wl,--undefined=_scanf_float")
 endif()
 
 # 生成 .hex / .bin 并打印固件大小

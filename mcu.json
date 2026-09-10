@@ -7,6 +7,7 @@
   "linkerScript": "STM32F407VGTx_FLASH.ld",
   "svd": "STM32F407.svd",
   "openocdTarget": "target/stm32f4x.cfg",
+  "floatIo": true,
   "defines": [
     "USE_HAL_DRIVER",
     "STM32F407xx"

@@ -30,9 +30,13 @@ if not launch_path.is_file():
 
 mcu = json.loads(mcu_path.read_text(encoding="utf-8"))
 
-# ${workspaceFolder} 必须保持字面量，所以用 r-string 拼接
+# ${workspaceFolder} 必须保持字面量，所以用字符串拼接
 svd_path = "${workspaceFolder}/.svd/" + mcu["svd"]
-exe_path = "${workspaceFolder}/build/Debug/${workspaceFolderBasename}.elf"
+
+# 产物名 = 工程目录名，按 CMakeLists.txt 里完全相同的规则消毒
+# （CMake 的 target 名不允许空格和括号，构建时会换成下划线）
+artifact = re.sub(r"[^A-Za-z0-9_.+-]", "_", root.resolve().name) or "mcu_firmware"
+exe_path = "${workspaceFolder}/build/Debug/" + artifact + ".elf"
 
 raw = original = launch_path.read_text(encoding="utf-8")
 

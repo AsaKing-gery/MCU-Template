@@ -42,7 +42,14 @@ $mcu = Get-Content -LiteralPath $mcuPath -Raw | ConvertFrom-Json
 
 # '${workspaceFolder}' must stay literal, so build these with single quotes.
 $svdPath = '${workspaceFolder}/.svd/' + $mcu.svd
-$exePath = '${workspaceFolder}/build/Debug/${workspaceFolderBasename}.elf'
+
+# Artifact name = project folder name, sanitised exactly the same way as in
+# CMakeLists.txt (CMake target names may not contain spaces or parentheses, so
+# the build renames them to '_'). Keep both sides in sync here.
+$dirName = Split-Path -Leaf (Resolve-Path -LiteralPath $ProjectRoot).Path
+$artifact = $dirName -replace '[^A-Za-z0-9_.+-]', '_'
+if (-not $artifact) { $artifact = 'mcu_firmware' }
+$exePath = '${workspaceFolder}/build/Debug/' + $artifact + '.elf'
 
 # Swap a "key": "value" pair without touching the rest of the file.
 # '$' is escaped for the .NET replacement string so that '${workspaceFolder}'

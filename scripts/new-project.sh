@@ -73,6 +73,7 @@ else
   "linkerScript": "$LDSCRIPT",
   "svd": "$SVD",
   "openocdTarget": "$OPENOCD",
+  "floatIo": true,
   "defines": [
     "$DEF_HAL",
     "$DEF_MCU"

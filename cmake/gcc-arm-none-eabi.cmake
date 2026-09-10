@@ -19,12 +19,9 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 set(_proj_root "${CMAKE_CURRENT_LIST_DIR}/..")
 get_filename_component(_proj_root "${_proj_root}" ABSOLUTE)
 
-# 链接脚本是以 "-T<路径>" 形式拼进链接参数的，路径含空格会被拆开
-if(_proj_root MATCHES " ")
-  message(WARNING
-    "工程路径含有空格：${_proj_root}\n"
-    "  -T<路径> 这类参数会因空格被拆开，建议把工程放在不含空格的目录下。")
-endif()
+# 注意：*_FLAGS_INIT 都是"按空格拆分"的字符串，所以这里不能出现任何含工程路径的参数。
+# 比如 -T<链接脚本> 就绝对不能写在这里——路径里一旦有空格（"E:/keil5 project/..."）
+# 就会被拆成两个参数。链接脚本改用 target_link_options 传，见 CMakeLists.txt 第 5 节。
 
 # -----------------------------------------------------------------------------
 # 1. 读取 mcu.json
@@ -79,6 +76,22 @@ else()
   endif()
 endif()
 
+# floatIo（可选字段，缺省 true）：是否启用浮点版 printf/scanf。
+# 相当于 CubeIDE 默认加的 -u _printf_float -u _scanf_float。
+#
+# 默认开是故意的：关掉的话 printf("%f") 会在运行时静默输出错值/空值，极难排查；
+# 开着的代价是约 14 KB flash，而每次构建都会打印内存占用，代价是看得见的。
+string(JSON _float_io ERROR_VARIABLE _float_io_err GET "${_mcu_raw}" floatIo)
+if(_float_io_err)
+  set(_float_io "true")
+endif()
+string(TOLOWER "${_float_io}" _float_io)
+if(_float_io STREQUAL "false" OR _float_io STREQUAL "0" OR _float_io STREQUAL "off")
+  set(_float_io_val OFF)
+else()
+  set(_float_io_val ON)
+endif()
+
 # 导出为 cache 变量，保证 CMakeLists.txt 里一定能读到。
 # 必须带 FORCE：mcu.json 是唯一事实来源，重新 configure 时要让新值覆盖旧缓存。
 set(MCU_DEVICE          "${MCU_DEVICE}"          CACHE STRING "MCU 型号（来自 mcu.json）"        FORCE)
@@ -89,6 +102,9 @@ set(MCU_LDSCRIPT        "${MCU_LDSCRIPT}"        CACHE STRING "链接脚本文�
 set(MCU_SVD             "${MCU_SVD}"             CACHE STRING "SVD 文件名（来自 mcu.json）"      FORCE)
 set(MCU_OPENOCD         "${MCU_OPENOCD}"         CACHE STRING "OpenOCD target 配置（来自 mcu.json）" FORCE)
 set(MCU_DEFINES_LIST    "${MCU_DEFINES_LIST}"    CACHE STRING "预处理宏（来自 mcu.json）"        FORCE)
+# 同样必须 FORCE。这里刻意不用 option()：option() 不会覆盖已存在的缓存项，
+# 结果就是"改了 mcu.json 里的 floatIo，重新 configure 却不生效"，很难发现。
+set(MCU_USE_PRINTF_FLOAT "${_float_io_val}" CACHE BOOL "启用浮点 printf/scanf（来自 mcu.json 的 floatIo）" FORCE)
 
 # -----------------------------------------------------------------------------
 # 2. 生成架构相关编译参数
@@ -207,9 +223,6 @@ set(CMAKE_CXX_FLAGS_INIT "${_arch_flags_str}")
 set(CMAKE_ASM_FLAGS_INIT "${_arch_flags_str} -x assembler-with-cpp")
 
 set(_ld_flags "${_arch_flags_str} --specs=nano.specs -Wl,--gc-sections -Wl,--print-memory-usage")
-if(MCU_LDSCRIPT_FILE)
-  set(_ld_flags "${_ld_flags} -T${MCU_LDSCRIPT_FILE}")
-endif()
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${_ld_flags}")
 
 # 编译该工具链时不要把宿主机路径当成目标系统路径搜索

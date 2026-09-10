@@ -234,6 +234,7 @@ VSCode 里 `Ctrl+Shift+P` → `Tasks: Run Task`，或直接 `Ctrl+Shift+B`。
 | `Build (Release)` | `-Os` 体积优化构建 |
 | `Rebuild (clean-first)` | 全量重编，改了 `CMakeLists.txt` / 预设后用它 |
 | `Clean (Debug)` | 清理 |
+| `Reset Build (delete cache)` | 删掉整个 `build/`。**移动/重命名工程目录后必须跑一次** |
 | `Flash (OpenOCD)` | 命令行烧录（ST-Link） |
 | `Disassemble (.asm)` | 生成反汇编，排查 HardFault |
 | `MCU: Sync from mcu.json` | 改完 `mcu.json` 后刷新 `launch.json` |
@@ -260,8 +261,19 @@ build/Debug/
 └── compile_commands.json   clangd 依赖它
 ```
 
-`<项目名>` = 工程目录名（例如目录叫 `MyF407` 就是 `MyF407.elf`），
-所以 `launch.json` 里用 `${workspaceFolderBasename}` 就能自动对上，永远不用改。
+`<项目名>` = 工程目录名，但会**消毒**一次。
+
+CMake 的 target 名只允许 `字母 / 数字 / _ / - / . / +`，而真实工程目录名常带空格和括号
+（比如 `JY.RFM-0A-U575(24G)`），直接拿来会 configure 失败。
+所以模板会把非法字符统一换成下划线：
+
+| 工程目录名 | 产物名 |
+|---|---|
+| `MyF407` | `MyF407.elf` |
+| `JY.RFM-0A-U575(24G)-cmake` | `JY.RFM-0A-U575_24G_-cmake.elf` |
+
+`launch.json` 里的 `executable` 由 `scripts/sync-mcu` 按**同一套规则**写入，
+两边永远一致，不用手动改。所以**项目路径里有空格也没问题**。
 
 ---
 
@@ -277,6 +289,7 @@ build/Debug/
   "linkerScript": "STM32F407VGTx_FLASH.ld",     // 链接脚本文件名，工具链自动在根目录/Core/查找
   "svd": "STM32F407.svd",                       // 放在 .svd/ 下，调试时看外设寄存器
   "openocdTarget": "target/stm32f4x.cfg",       // OpenOCD 的 target 配置
+  "floatIo": true,                              // 见下方"浮点 printf"，缺省 true
   "defines": ["USE_HAL_DRIVER", "STM32F407xx"]  // 预处理宏，就是 HAL 的器件宏
 }
 ```
@@ -336,13 +349,28 @@ while (1)
 }
 ```
 
-### 浮点 printf
+### 浮点 printf / scanf
 
-默认关闭（省空间）。需要 `printf("%f")` 时：
+由 `mcu.json` 的 **`floatIo`** 控制，**缺省 `true`**（和 CubeIDE 的行为一致）。
 
-```bash
-cmake --preset Debug -DMCU_USE_PRINTF_FLOAT=ON
+| 值 | 链接参数 | 代价 |
+|---|---|---|
+| `true` | `-Wl,--undefined=_printf_float` + `-Wl,--undefined=_scanf_float` | 约 +14 KB flash |
+| `false` | 无 | 省约 14 KB |
+
+```jsonc
+"floatIo": true    // 关掉就改成 false
 ```
+
+> **为什么默认开**：关掉的话 `printf("%f")` 不会报错，而是**在运行时静默输出错值/空值**，
+> 极难排查。开着的代价每次构建都会在内存占用里显示出来，是看得见的。
+>
+> ⚠️ 这个开关**必须写在 `mcu.json` 里**，不能只靠命令行 `-D`：命令行设置只存在
+> CMake 缓存里，一旦删缓存（比如移动工程目录后）就会悄悄掉回默认值。
+>
+> 实现细节：不能写成 `-u _printf_float -u _scanf_float` —— CMake 会对
+> `target_link_options` 里的重复项去重，第二个 `-u` 会被删掉，
+> `_scanf_float` 就被当成输入文件报 `cannot find _scanf_float`。
 
 ---
 
@@ -389,6 +417,26 @@ clangd 靠 `build/Debug/compile_commands.json` 工作，**它必须先 configure
 4. 看 `Ctrl+Shift+U`（输出面板）选 `clangd` 有没有报错。
 5. `.clangd` 里的 `CompilationDatabase: build/Debug` 要和实际输出目录一致（换 Release 时记得改）。
 
+**Q：移动 / 重命名了工程目录，configure 报 `CMakeCache.txt directory ... is different`**
+
+这不是代码问题，是 CMake 的正常保护机制。`build/Debug/CMakeCache.txt` 里存的是
+**绝对路径**（`CMAKE_HOME_DIRECTORY`、编译器路径、头文件路径……几百条），
+目录一移动就对不上了，CMake 会拒绝继续。
+
+`build/` 是一次性的缓存，删掉重配即可。三种方式任选：
+
+```powershell
+# 命令行
+cmake --preset Debug --fresh      # 需要 CMake >= 3.24
+```
+
+- VSCode：`Ctrl+Shift+P` → `CMake: Delete Cache and Reconfigure`
+- 或跑任务 `Reset Build (delete cache)`，然后 `Ctrl+Shift+B`
+
+> **除 `build/` 外，工程里其它配置都是路径无关的**（`mcu.json`、`CMakePresets.json`、
+> `.vscode/`、`.clangd`、工具链文件全部用 `${workspaceFolder}` / `${sourceDir}` / 相对路径），
+> 所以换目录、换电脑都不用改任何配置。
+
 **Q：CubeMX 重新生成后 `CMakeLists.txt` 被覆盖了**
 CubeMX 选 `CMake` toolchain 时确实会覆盖。重新执行一次
 `scripts/new-project.ps1 <你的工程目录>`（不会动 `mcu.json`）。
@@ -422,7 +470,9 @@ $p = [Environment]::GetEnvironmentVariable('Path','User')
 CMake 侧改了 `-mcpu` / `-mfpu` 后要重新 configure（`Rebuild (clean-first)`）。
 
 **Q：`printf` 输出不了 `%f`**
-打开 `MCU_USE_PRINTF_FLOAT`（见上一节），会增大固件体积。
+检查 `mcu.json` 的 `floatIo` 是不是被改成了 `false`（默认是 `true`）。
+注意**不要**用命令行 `-DMCU_USE_PRINTF_FLOAT=ON` 来解决 —— 那样只改 CMake 缓存，
+换台电脑或删掉 `build/` 之后又会失效。
 
 **Q：`flash` 任务提示找不到 openocd**
 `flash` 目标会自动探测 CubeIDE 自带的 OpenOCD，所以正常情况不用配。

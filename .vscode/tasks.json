@@ -85,6 +85,18 @@
       }
     },
     {
+      // 工程目录被移动/重命名后，build/ 里的 CMakeCache.txt 记录的还是旧绝对路径，
+      // configure 会直接报错。跑这个任务把缓存整个删掉即可。
+      "label": "Reset Build (delete cache)",
+      "type": "shell",
+      "command": "cmake -E remove_directory ${workspaceFolder}/build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
       "label": "Flash (OpenOCD)",
       "type": "shell",
       "command": "cmake --build --preset Debug --target flash",
