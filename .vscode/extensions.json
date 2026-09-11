@@ -6,7 +6,23 @@
     "ms-vscode.cpptools",
     "dan-c-underwood.arm"
   ],
+  // 这些装了会和本模板抢同一块地方，建议禁掉：
+  //
+  //   ms-vscode.cpptools-extension-pack  里面捆了 C/C++ 的 IntelliSense，和 clangd 打架
+  //   stmicroelectronics.*               ST 官方扩展包自带自己的一套构建(clangd+CMake)和调试
+  //                                      (ST-Link GDB server)，会在「运行和调试」里塞进它自己的
+  //                                      条目，和 Cortex-Debug 重复，容易选错
+  //
+  // 注意：这里只是"不推荐"提示。已经装了的要手动禁用：
+  //   扩展面板 → 搜 stmicroelectronics → 每个都点「禁用」
+  // （如果其中某个是你 ST 项目要用的，保留 `stm32cube-ide-debug-stlink-gdbserver` 也行。）
   "unwantedRecommendations": [
-    "ms-vscode.cpptools-extension-pack"
+    "ms-vscode.cpptools-extension-pack",
+    "stmicroelectronics.stm32-vscode-extension",
+    "stmicroelectronics.stm32cube-ide-core",
+    "stmicroelectronics.stm32cube-ide-project-manager",
+    "stmicroelectronics.stm32cube-ide-build-cmake",
+    "stmicroelectronics.stm32cube-ide-clangd",
+    "stmicroelectronics.stm32cube-ide-debug-stlink-gdbserver"
   ]
 }

@@ -56,6 +56,10 @@
       // 注意：这里【不能】写 ${workspaceFolder} —— 工程路径含括号
       // （JY.RFM-0A-U575(24G)-cmake）时，PowerShell 会把 (24G) 当子表达式拆开。
       // cmake 命令本身不含路径，所以直接写就好。
+      //
+      // presentation 里【故意不用 clear】—— 用了的话每次构建都会先清屏，
+      // 把 dependsOn 的 Configure 刚打印出来的 MCU 配置摘要一起擦掉，
+      // 结果就是永远看不到那段中文横幅（之前排查乱码时就是这么被坑的）。
       "label": "Build (Debug)",
       "type": "shell",
       "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --build --preset Debug",
@@ -77,8 +81,7 @@
       },
       "presentation": {
         "reveal": "always",
-        "panel": "shared",
-        "clear": true
+        "panel": "shared"
       }
     },
     {
@@ -100,8 +103,7 @@
       },
       "presentation": {
         "reveal": "always",
-        "panel": "shared",
-        "clear": true
+        "panel": "shared"
       }
     },
     {
@@ -122,8 +124,7 @@
       },
       "presentation": {
         "reveal": "always",
-        "panel": "shared",
-        "clear": true
+        "panel": "shared"
       }
     },
     {
