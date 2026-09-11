@@ -5,9 +5,9 @@
     existing STM32CubeMX project folder.
 
 .DESCRIPTION
-    Copies .vscode / cmake / scripts / App / .svd / .clangd / CMakeLists.txt /
-    CMakePresets.json into the target directory, generates mcu.json from -Chip or
-    the explicit parameters, then runs sync-mcu.ps1.
+    Copies .vscode / cmake / scripts / App / .svd / .clangd / .clang-format /
+    CMakeLists.txt / CMakePresets.json into the target directory, generates
+    mcu.json from -Chip or the explicit parameters, then runs sync-mcu.ps1.
 
     If the target already contains mcu.json it is kept as-is unless -Force is used,
     so re-applying the template never destroys your chip settings.
@@ -145,7 +145,7 @@ if (Test-Path -LiteralPath $targetRoot) {
 # -----------------------------------------------------------------------------
 $entries = @(
     '.vscode', 'cmake', 'scripts', 'App', '.svd',
-    '.clangd', '.gitignore', 'CMakeLists.txt', 'CMakePresets.json'
+    '.clangd', '.clang-format', '.gitignore', 'CMakeLists.txt', 'CMakePresets.json'
 )
 
 foreach ($entry in $entries) {

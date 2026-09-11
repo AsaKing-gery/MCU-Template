@@ -11,14 +11,15 @@
 #define __APP_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/** 上电初始化：在外设初始化完成后调用一次 */
-void App_Init(void);
+	/** 上电初始化：在外设初始化完成后调用一次 */
+	void App_Init(void);
 
-/** 主循环：在 while(1) 中反复调用 */
-void App_Loop(void);
+	/** 主循环：在 while(1) 中反复调用 */
+	void App_Loop(void);
 
 #ifdef __cplusplus
 }

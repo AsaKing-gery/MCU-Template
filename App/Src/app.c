@@ -7,10 +7,10 @@
 
 void App_Init(void)
 {
-    /* TODO: 在这里做上电初始化 */
+	/* TODO: 在这里做上电初始化 */
 }
 
 void App_Loop(void)
 {
-    /* TODO: 在这里写主循环逻辑 */
+	/* TODO: 在这里写主循环逻辑 */
 }

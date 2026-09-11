@@ -31,6 +31,7 @@ MCU-Template/
 ├── CMakeLists.txt              通用构建脚本（不含任何芯片信息）
 ├── CMakePresets.json           Debug / Release 两套预设
 ├── .clangd                     clangd 配置（指向 build/Debug）
+├── .clang-format               ★ 代码格式化规则（Tab + Allman，按国内单片机习惯调过）
 ├── .gitignore
 ├── cmake/
 │   ├── gcc-arm-none-eabi.cmake 工具链文件，自动解析 mcu.json
@@ -38,14 +39,15 @@ MCU-Template/
 ├── scripts/
 │   ├── setup-env.ps1           ★ 一次性配置 Windows 用户环境变量（PATH / OPENOCD_SCRIPTS）
 │   ├── fix-encoding.ps1        ★ 找出（并可转换）GBK 编码的源文件——clangd 只认 UTF-8
+│   ├── format-all.ps1          ★ 整个工程跑 clang-format（默认预览、可备份应用）
 │   ├── new-project.ps1         ★ 一键建工程 / 把模板应用到已有工程（Windows）
 │   ├── new-project.sh          同上（Linux / macOS）
 │   ├── sync-mcu.ps1            mcu.json → launch.json 同步
 │   └── sync-mcu.sh             同上（Linux / macOS）
 ├── .vscode/
-│   ├── settings.json           CMake Presets + clangd
+│   ├── settings.json           CMake Presets + clangd + clang-format
 │   ├── launch.json             Cortex-Debug：OpenOCD / J-Link / Attach
-│   ├── tasks.json              Configure / Build / Rebuild / Flash / Sync
+│   ├── tasks.json              Configure / Build / Rebuild / Flash / Sync / Format
 │   └── extensions.json         推荐扩展
 ├── App/                        你自己的代码放这里（CubeMX 不会覆盖）
 │   ├── Inc/app.h
@@ -63,6 +65,7 @@ MCU-Template/
 | **Ninja** | 构建后端。装了 VS 也一样自带 | `ninja --version` |
 | **Arm GNU Toolchain** | `arm-none-eabi-*`。装过 STM32CubeIDE / CubeCLT 就不用另外装，模板会自动找到 | `arm-none-eabi-gcc --version` |
 | **OpenOCD** | 烧录 / 调试用（用 J-Link 可跳过）。CubeIDE 自带的也能自动找到 | `openocd --version` |
+| **clang-format** | 代码格式化（可选）。**VS 自带一份**，`setup-env.ps1` 会自动找到 | `clang-format --version` |
 | **STM32CubeMX** | 生成初始化代码（可只用一次） | — |
 
 ### 一键配置环境（Windows，推荐先跑这个）
@@ -239,6 +242,103 @@ VSCode 里 `Ctrl+Shift+P` → `Tasks: Run Task`，或直接 `Ctrl+Shift+B`。
 | `Flash (OpenOCD)` | 命令行烧录（ST-Link） |
 | `Disassemble (.asm)` | 生成反汇编，排查 HardFault |
 | `MCU: Sync from mcu.json` | 改完 `mcu.json` 后刷新 `launch.json` |
+| `Format All (preview)` | **预览**全工程 clang-format 会改哪些文件、多少行，不写盘 |
+| `Format All (apply)` | 真正执行格式化（先备份到 `%USERPROFILE%\.mcu-template-backup\`） |
+
+### 代码格式化（clang-format）
+
+规则在工程根的 **`.clang-format`**，已经按国内单片机代码习惯调好：
+
+| 选项 | 值 | 说明 |
+|---|---|---|
+| `UseTab` / `TabWidth` | `Always` / `4` | **Tab 缩进**，和 Keil、CubeMX 生成的代码一致 |
+| `BreakBeforeBraces` | `Allman` | 大括号独占一行 |
+| `SpaceBeforeParens` | `Never` | `if(` `while(` 不留空格 |
+| `PointerAlignment` | `Right` | `uint8_t *p` |
+| `ColumnLimit` | `0` | **不折行** —— 对已有代码改动最小，只动缩进/空格/大括号 |
+| `SortIncludes` | `Never` | 不重排 `#include`（嵌入式里包含顺序常有依赖，排了会编不过） |
+| `AlignConsecutiveMacros` | `true` | 连续的宏定义对齐（`#define` 表格好看） |
+
+**三种用法：**
+
+```powershell
+# ① 单个文件：VSCode 里 Shift+Alt+F
+# ② 整个工程（先预览）
+powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot <工程目录>
+# ③ 确认后执行（自动备份）
+powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot <工程目录> -Apply
+```
+
+### ⚠️ 两个必须避开的坑
+
+**① 汇编文件绝对不能格式化**
+
+`clang-format` **没有汇编前端**。给它 `.s` 文件，它会按 C++ 解析并把文件毁掉：
+
+```
+cpu cortex-m33              ->   cpu cortex-
+                                 m33             Error: unknown cpu `cortex-'
+.section .text.Reset_Handler ->  .section.text.reset_handler
+```
+
+所以脚本的扩展名列表里**故意没有 `.s` / `.S`**。CubeMX 生成的
+`Core/Startup/startup_stm32xxxx.s` 必须原样保留。
+
+**② 厂商代码要排除，否则 diff 会失控**
+
+CubeMX 工程里的第三方代码往往比你自己的代码多得多，而且都是空格缩进 ——
+强制转成 Tab 会让**每一行都算改动**。实测某工程：
+
+| 范围 | 待格式化文件 | 行改动 |
+|---|---:|---:|
+| 只排除 `Drivers` | 172 | **+114461 / −116113** |
+| 再加上 `User\Src\Libraries`、`arm_math.h`、`FATFS` | 96 | **+18282 / −18682** |
+
+**差 6 倍。** 厂商代码还会带来别的问题：
+
+- 以后没法再和上游版本对比
+- CubeMX 重新生成代码时会产生一堆无意义的 diff
+- 有些厂商头文件（如 IAR 专用的 `cmsis_iccarm.h`）clang-format 直接解析失败
+
+典型需要排除的位置：
+
+| 位置 | 是什么 |
+|---|---|
+| `Drivers/` | ST 的 HAL / CMSIS 驱动 |
+| `User/Src/Libraries/`（视工程而定） | 另一份 ST LL 驱动副本 |
+| `arm_math.h` | ARM CMSIS-DSP 数学库 |
+| `sd_card/FATFS/`（视工程而定） | FatFs 文件系统 |
+| `Middlewares/` | FreeRTOS / LwIP / USB 协议栈等 |
+
+用法：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot <工程目录> `
+    -ExcludeDirs Drivers,'User\Src\Libraries','sd_card\FATFS' `
+    -ExcludeFiles 'arm_math.h'
+```
+
+`-ExcludeDirs @()` 表示不排除任何目录（格式化所有东西）。
+
+> 判断标准很简单：**这段代码不是你写的、而且以后还会被上游覆盖 → 排除掉。**
+
+**为什么 `editor.formatOnSave` 默认是关的**
+
+格式化的代价是 diff。老工程第一次全量格式化通常会**改动 70% 以上的行** ——
+如果开着"保存即格式化"，你每改一个字符都会顺手把整个文件重排一遍，
+git/svn 的 diff 会变得完全没法 review，blame 也全废。
+
+建议流程：
+
+1. 先跑一次 `Format All (apply)`，把存量一次性清干净
+2. **单独提交这个"纯格式"变更**（commit message 写明 formatting only）
+3. 之后再考虑打开 `editor.formatOnSave`，增量维护就轻松了
+
+> ⚠️ **clang-format 不改代码语义**，但它会重排空白。格式化后请**重新编译一次**，
+> 确认 `.bin` 的 md5 没变（除了极少数因为字符串字面量跨行拼接而变化的场景）。
+>
+> ⚠️ 它对 **GBK 文件是安全的**（实测中文一个不丢，只动空白字节），
+> 但混着编码容易乱，建议先用 `fix-encoding.ps1` 转成 UTF-8 再格式化。
 
 命令行等价：
 

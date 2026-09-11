@@ -52,7 +52,7 @@ fi
 mkdir -p "$TARGET"
 
 echo "[new-project] 复制模板文件到 $TARGET"
-for entry in .vscode cmake scripts App .svd .clangd .gitignore CMakeLists.txt CMakePresets.json; do
+for entry in .vscode cmake scripts App .svd .clangd .clang-format .gitignore CMakeLists.txt CMakePresets.json; do
     if [[ -e "$TEMPLATE_ROOT/$entry" ]]; then
         cp -R "$TEMPLATE_ROOT/$entry" "$TARGET/"
         echo "  + $entry"

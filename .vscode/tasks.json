@@ -97,6 +97,28 @@
       }
     },
     {
+      // 整个工程跑一遍 clang-format。默认是"预览"，只报告会改哪些文件、多少行。
+      // 确认后跑 "Format All (apply)" 真正写入（会先备份到 %USERPROFILE%\.mcu-template-backup\）。
+      "label": "Format All (preview)",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/scripts/format-all.ps1\" -ProjectRoot \"${workspaceFolder}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Format All (apply)",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/scripts/format-all.ps1\" -ProjectRoot \"${workspaceFolder}\" -Apply",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
       "label": "Flash (OpenOCD)",
       "type": "shell",
       "command": "cmake --build --preset Debug --target flash",

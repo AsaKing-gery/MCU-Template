@@ -182,6 +182,25 @@ if (-not $gccDir) {
 }
 
 # -----------------------------------------------------------------------------
+# 4c. clang-format
+#
+# Visual Studio ships a perfectly good clang-format under VC\Tools\Llvm\bin,
+# but it is not on PATH. The clangd VSCode extension looks the formatter up by
+# the name "clang-format" through PATH, so without this "Format Document"
+# (Shift+Alt+F) fails with "clang-format not found".
+# -----------------------------------------------------------------------------
+$clangFormatDir = Find-InPathEntries 'clang-format.exe' $allParts
+if (-not $clangFormatDir) {
+    $cand = Find-NewestPath @(
+        'C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\bin'
+        'C:\Program Files\Microsoft Visual Studio\*\*\VC\Tools\Llvm\x64\bin'
+        'C:\Program Files\LLVM\bin'
+        'C:\Program Files (x86)\LLVM\bin'
+    )
+    if ($cand -and (Test-Path -LiteralPath (Join-Path $cand 'clang-format.exe'))) { $clangFormatDir = $cand }
+}
+
+# -----------------------------------------------------------------------------
 # 5. Report + work out the diff
 # -----------------------------------------------------------------------------
 $entries = @(
@@ -189,6 +208,7 @@ $entries = @(
     [pscustomobject]@{ Name = 'ninja';   Dir = $ninjaDir;   Exe = 'ninja.exe' }
     [pscustomobject]@{ Name = 'openocd'; Dir = $openocdDir; Exe = 'openocd.exe' }
     [pscustomobject]@{ Name = 'gcc';     Dir = $gccDir;     Exe = 'arm-none-eabi-gcc.exe' }
+    [pscustomobject]@{ Name = 'format';  Dir = $clangFormatDir; Exe = 'clang-format.exe' }
 )
 
 $toAdd = @()
@@ -199,6 +219,7 @@ foreach ($e in $entries) {
             'ninja'   { 'install Ninja, e.g. "pip install ninja"' }
             'openocd' { 'only needed for flashing/debugging with OpenOCD (J-Link users can skip)' }
             'gcc'     { 'required: CMake locates it itself, but clangd needs it on PATH to find newlib headers (stdio.h/math.h)' }
+            'format'  { 'optional: only needed for "Format Document". Visual Studio ships one under VC\Tools\Llvm\bin' }
             default   { 'install it' }
         }
         Write-Info ("  {0,-8}: not found  ({1})" -f $e.Name, $hint) -Color Yellow
