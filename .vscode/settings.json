@@ -61,5 +61,16 @@
   "[cpp]": {
     "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
   },
+
+  // ───────── 终端 ─────────
+  // 保持默认的 PowerShell，不自定义 profile。
+  //
+  // 中文乱码（「生成」变成「鐢熸垚」）不在这个文件里修，而是在 tasks.json 的
+  // 命令前加上 [Console]::OutputEncoding=[Text.Encoding]::UTF8，原因见那里的注释。
+  //
+  // 教训：曾经在这里加过一个"先 chcp 65001"的自定义 profile，结果反而把终端
+  // 搞坏了 —— VSCode 是经 cmd.exe 拉起 profile 的，参数里的 `>` 会被 cmd 当成
+  // 重定向，`-Command` 被拆坏，任务直接报「参数格式不正确 - -Command」。
+  // 另外实测确认：光敲 `chcp 65001` 修不好乱码，必须设 [Console]::OutputEncoding。
   "terminal.integrated.defaultProfile.windows": "PowerShell"
 }

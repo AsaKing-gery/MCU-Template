@@ -22,11 +22,20 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot)
+    [string]$ProjectRoot
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# $PSScriptRoot is NOT reliably populated while parameters are being bound
+# (under Windows PowerShell 5.1 it was observed to be empty here), so the
+# default is resolved in the body instead. Falling back to the current
+# directory also makes it work when launched as a VSCode task, where the
+# working directory is already the project root.
+if (-not $ProjectRoot) {
+    $ProjectRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { (Get-Location).Path }
+}
 
 $mcuPath    = Join-Path $ProjectRoot 'mcu.json'
 $launchPath = Join-Path $ProjectRoot '.vscode/launch.json'
@@ -72,7 +81,7 @@ $raw = Set-JsonString -Text $raw -Key 'device'     -Value $mcu.device
 $raw = Set-JsonString -Text $raw -Key 'svdFile'    -Value $svdPath
 $raw = Set-JsonString -Text $raw -Key 'executable' -Value $exePath
 
-# configFiles 的第二个元素是 OpenOCD 的 target 脚本，形如 "target/stm32f4x.cfg"
+# The second entry of configFiles is the OpenOCD target script, e.g. "target/stm32f4x.cfg"
 $raw = [regex]::Replace($raw, '"target/[^"]*[.]cfg"', '"' + $mcu.openocdTarget + '"')
 
 if ($raw -eq $before) {

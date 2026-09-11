@@ -16,6 +16,20 @@ set(CMAKE_SYSTEM_PROCESSOR  arm)
 # 裸机工程无法完成链接测试（没有默认启动文件），用静态库代替
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
+# -----------------------------------------------------------------------------
+# 编译器诊断信息上色（warning 黄色、error 红色）
+#
+# 打开的后果：GCC 命令行会带上 -fdiagnostics-color=always。
+# 必须显式用 always：构建时编译器输出被 Ninja 接管，不再是 TTY，
+# GCC 会自动关掉颜色，于是终端里 warning/error 和普通输出一个色。
+#
+# 注意：CMake 在 project() 时读取这个变量来初始化各语言的 flags，
+# 所以必须写在工具链文件里（工具链文件早于 project() 被 include）。
+# -----------------------------------------------------------------------------
+if(NOT CMAKE_VERSION VERSION_LESS 3.24)
+  set(CMAKE_COLOR_DIAGNOSTICS ON)
+endif()
+
 set(_proj_root "${CMAKE_CURRENT_LIST_DIR}/..")
 get_filename_component(_proj_root "${_proj_root}" ABSOLUTE)
 
@@ -222,7 +236,11 @@ set(CMAKE_C_FLAGS_INIT   "${_arch_flags_str}")
 set(CMAKE_CXX_FLAGS_INIT "${_arch_flags_str}")
 set(CMAKE_ASM_FLAGS_INIT "${_arch_flags_str} -x assembler-with-cpp")
 
-set(_ld_flags "${_arch_flags_str} --specs=nano.specs -Wl,--gc-sections -Wl,--print-memory-usage")
+# 不再加 -Wl,--print-memory-usage：
+# 链接器那份报告是白字，混在 ninja 输出里看不见，而且和 cmake/report_size.cmake
+# 的彩色报告重复。彩色报告由 POST_BUILD 生成（见 CMakeLists.txt 第 5 节），
+# 超容量时同样会标红。链接器真正遇到装不下时仍会直接报 link error。
+set(_ld_flags "${_arch_flags_str} --specs=nano.specs -Wl,--gc-sections")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${_ld_flags}")
 
 # 编译该工具链时不要把宿主机路径当成目标系统路径搜索

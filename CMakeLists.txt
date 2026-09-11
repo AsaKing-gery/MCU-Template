@@ -37,20 +37,71 @@ if(NOT DEFINED MCU_CPU)
     "并确认 cmake/gcc-arm-none-eabi.cmake 与 mcu.json 都在工程根目录下。")
 endif()
 
-message(STATUS "── MCU 配置 ───────────────────────────────────")
-message(STATUS "  产物名        : ${PROJECT_NAME}.elf")
-message(STATUS "  device        : ${MCU_DEVICE}")
-message(STATUS "  cpu / fpu     : ${MCU_CPU} / ${MCU_FPU}")
-message(STATUS "  float-abi     : ${MCU_FLOAT_ABI}")
-message(STATUS "  linker script : ${MCU_LDSCRIPT_FILE}")
-message(STATUS "  defines       : ${MCU_DEFINES_LIST}")
-message(STATUS "───────────────────────────────────────────────")
+# -----------------------------------------------------------------------------
+# 终端彩色输出
+#
+#   * 编译器诊断（GCC 的 warning / error）的颜色由 CMAKE_COLOR_DIAGNOSTICS 控制，
+#     它在工具链文件里设置（必须早于 project()）。那个是安全的，见下面的说明。
+#   * 下面这套 ANSI 转义给本文件自己的 message() 上色，方便在一大堆输出里
+#     一眼找到"配置摘要 / 警告 / 出错"。
+#
+# 为什么默认【关闭】：
+#   CMake Tools 扩展把配置输出写到 VSCode 的"输出"面板，而那个面板
+#   **不渲染 ANSI 转义**，会把 [1;36m 这种序列当普通文字打出来 ——
+#   比没颜色更难看。只有真正的"终端"才渲染。
+#   所以这里默认关，由 .vscode/tasks.json 里的任务通过环境变量打开。
+#
+# 为什么要用 set() 而不是 option()：
+#   option() 会把值写进 CMakeCache.txt。一旦写进去，之后从 CMake Tools
+#   构建时也会读到它，"输出"面板又变成乱码，而且很难查。
+#   普通 set() 只在本文件作用域生效，不落缓存。
+#
+# 手动开启（在能渲染 ANSI 的终端里）：
+#       设置环境变量 MCU_COLOR_OUTPUT=1 后重新 configure
+#
+# 注：CMAKE_COLOR_DIAGNOSTICS 不受这里影响 —— 构建时编译器输出要经过 ninja，
+#     而 ninja 在输出不是终端时会自己把 ANSI 剥掉，所以"输出"面板里不会出现乱码。
+# -----------------------------------------------------------------------------
+set(MCU_COLOR_OUTPUT OFF)
+if(DEFINED ENV{MCU_COLOR_OUTPUT})
+  set(MCU_COLOR_OUTPUT "$ENV{MCU_COLOR_OUTPUT}")
+endif()
+
+if(MCU_COLOR_OUTPUT)
+  string(ASCII 27 _esc)
+  set(_c_title "${_esc}[1;36m")  # 亮青：分节标题
+  set(_c_key   "${_esc}[36m")    # 青  ：字段名
+  set(_c_val   "${_esc}[97m")    # 亮白：字段值
+  set(_c_ok    "${_esc}[1;32m")  # 亮绿：正常
+  set(_c_warn  "${_esc}[1;33m")  # 亮黄：警告
+  set(_c_err   "${_esc}[1;31m")  # 亮红：错误
+  set(_c_dim   "${_esc}[2m")     # 暗色：次要信息
+  set(_c_off   "${_esc}[0m")
+else()
+  set(_c_title "")
+  set(_c_key "")
+  set(_c_val "")
+  set(_c_ok "")
+  set(_c_warn "")
+  set(_c_err "")
+  set(_c_dim "")
+  set(_c_off "")
+endif()
+
+message(STATUS "${_c_title}━━━ MCU 配置 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_c_off}")
+message(STATUS "  ${_c_key}产物名        ${_c_off}: ${_c_val}${PROJECT_NAME}.elf${_c_off}")
+message(STATUS "  ${_c_key}device        ${_c_off}: ${_c_val}${MCU_DEVICE}${_c_off}")
+message(STATUS "  ${_c_key}cpu / fpu     ${_c_off}: ${_c_val}${MCU_CPU} / ${MCU_FPU}${_c_off}")
+message(STATUS "  ${_c_key}float-abi     ${_c_off}: ${_c_val}${MCU_FLOAT_ABI}${_c_off}")
+message(STATUS "  ${_c_key}linker script ${_c_off}: ${_c_val}${MCU_LDSCRIPT_FILE}${_c_off}")
+message(STATUS "  ${_c_key}defines       ${_c_off}: ${_c_val}${MCU_DEFINES_LIST}${_c_off}")
+message(STATUS "${_c_title}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_c_off}")
 
 # 链接脚本缺失不是致命错误（先 configure 再让 CubeMX 生成代码是常见顺序），
 # 但要明确提示，否则最后会在链接阶段报一堆莫名其妙的错误。
 if(NOT MCU_LDSCRIPT_FILE OR MCU_LDSCRIPT_FILE MATCHES "-NOTFOUND$")
   message(WARNING
-    "在工程中找不到链接脚本 \"${MCU_LDSCRIPT}\"。\n"
+    "${_c_warn}在工程中找不到链接脚本 \"${MCU_LDSCRIPT}\"。${_c_off}\n"
     "  * 已经用 CubeMX 生成过代码：把 .ld 放到工程根目录，或改 mcu.json 的 linkerScript\n"
     "  * 还没生成：忽略本警告，生成后再重新 configure")
 endif()
@@ -191,7 +242,13 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
   COMMAND ${CMAKE_OBJCOPY} -O binary
           $<TARGET_FILE:${PROJECT_NAME}>
           $<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.bin
-  COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${PROJECT_NAME}>
+  COMMAND ${CMAKE_COMMAND}
+          "-DSIZE=${CMAKE_SIZE}"
+          "-DELF=$<TARGET_FILE:${PROJECT_NAME}>"
+          "-DMAP=$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.map"
+          "-DLDSCRIPT=${MCU_LDSCRIPT_FILE}"
+          "-DMCU_COLOR_OUTPUT=${MCU_COLOR_OUTPUT}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/report_size.cmake"
   COMMENT "生成 .hex / .bin 并统计固件大小"
   VERBATIM)
 

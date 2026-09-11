@@ -37,6 +37,7 @@ MCU-Template/
 │   ├── gcc-arm-none-eabi.cmake 工具链文件，自动解析 mcu.json
 │   └── disasm.cmake             反汇编辅助脚本（供给 disasm 目标调用）
 ├── scripts/
+│   ├── build.ps1               ★ 一键构建：修 UTF-8 中文乱码 + 打印彩色摘要（Ctrl+Shift+B 用它）
 │   ├── setup-env.ps1           ★ 一次性配置 Windows 用户环境变量（PATH / OPENOCD_SCRIPTS）
 │   ├── fix-encoding.ps1        ★ 找出（并可转换）GBK 编码的源文件——clangd 只认 UTF-8
 │   ├── format-all.ps1          ★ 整个工程跑 clang-format（默认预览、可备份应用）
@@ -232,18 +233,164 @@ powershell -ExecutionPolicy Bypass -File scripts/new-project.ps1 . -Chip stm32f4
 
 VSCode 里 `Ctrl+Shift+P` → `Tasks: Run Task`，或直接 `Ctrl+Shift+B`。
 
-| 任务 | 作用 |
+| 任务 | 作用 | Keil 里对应 |
+|---|---|---|
+| `Build (Debug)` | 默认构建，`Ctrl+Shift+B`，自动先 configure | **Build（F7）** |
+| `Build (Release)` | `-Os` 体积优化构建 | 切到 Release Target 再 Build |
+| `Rebuild (clean-first)` | 全量重编，改了 `CMakeLists.txt` / 预设后用它 | **Rebuild** |
+| `Clean (Debug)` | 清理产物 | Clean Target |
+| `Reset Build (delete cache)` | 删掉整个 `build/`。**移动/重命名工程目录后必须跑一次** | 删掉 Objects 目录（更彻底） |
+| `Flash (OpenOCD)` | 只烧录，不调试（ST-Link） | **Download（F8）** |
+| `Disassemble (.asm)` | 生成反汇编，排查 HardFault | 反汇编窗口 |
+| `MCU: Sync from mcu.json` | 改完 `mcu.json` 后刷新 `launch.json` | 改完 Device 设置 |
+| `Format All (preview)` | **预览**全工程 clang-format 会改哪些文件、多少行，不写盘 | — |
+| `Format All (apply)` | 真正执行格式化（先备份到 `%USERPROFILE%\.mcu-template-backup\`） | — |
+
+> ⚠️ **`.vscode/tasks.json` 里刻意不写 `${workspaceFolder}`**
+>
+> 工程路径一旦含**括号**（例如 `JY.RFM-0A-U575(24G)-cmake`），PowerShell 会把
+> `(24G)` 当成**子表达式**，命令会被拆坏：
+>
+> ```
+> 24G : 无法将"24G"项识别为 cmdlet、函数、脚本文件或可运行程序的名称
+> ```
+>
+> 任务的工作目录默认就是工程根，所以这里全部用**相对路径**（`scripts/xxx.ps1`、`build`）。
+> **你自己加任务时也请照做。**
+
+### 构建 / 重新构建 / 烧录 —— 别混
+
+**编译和烧录是完全两件事**：编译只是产出 `.elf` / `.hex` / `.bin`，**不会碰芯片**。
+
+| 想干什么 | 怎么做 | 说明 |
+|---|---|---|
+| **只编译** | `Ctrl+Shift+B` | 产出固件文件，芯片里什么都没变 |
+| **编译 + 烧录 + 进调试** | **`F5`** | `launch.json` 里配了 `preLaunchTask: "Build (Debug)"`，一步到位。**日常就用这个** |
+| **只烧录**（不调试） | `Tasks: Run Task` → `Flash (OpenOCD)` | 相当于 Keil 的 Download（F8） |
+| **附加到正在跑的目标** | F5 选 `Attach (OpenOCD)` | 不复位、不下载，看现场 |
+
+**关于 Rebuild（编译缓存冲突）**
+
+Keil 因为依赖追踪较弱，经常需要 Rebuild。CMake + Ninja 的依赖追踪是**文件级 + 命令行级**的
+（改了源码、头文件、编译参数、甚至 `mcu.json` 都会自动重编），所以**平时不需要 Rebuild**。
+
+需要的时候：
+
+| 情况 | 用哪个 |
 |---|---|
-| `Build (Debug)` | 默认构建，`Ctrl+Shift+B`，自动先 configure |
-| `Build (Release)` | `-Os` 体积优化构建 |
-| `Rebuild (clean-first)` | 全量重编，改了 `CMakeLists.txt` / 预设后用它 |
-| `Clean (Debug)` | 清理 |
-| `Reset Build (delete cache)` | 删掉整个 `build/`。**移动/重命名工程目录后必须跑一次** |
-| `Flash (OpenOCD)` | 命令行烧录（ST-Link） |
-| `Disassemble (.asm)` | 生成反汇编，排查 HardFault |
-| `MCU: Sync from mcu.json` | 改完 `mcu.json` 后刷新 `launch.json` |
-| `Format All (preview)` | **预览**全工程 clang-format 会改哪些文件、多少行，不写盘 |
-| `Format All (apply)` | 真正执行格式化（先备份到 `%USERPROFILE%\.mcu-template-backup\`） |
+| 改了 `CMakeLists.txt` / `CMakePresets.json` / `mcu.json` | `Rebuild (clean-first)` |
+| 改了工具链文件的 flags | `Rebuild (clean-first)` |
+| **移动 / 重命名了工程目录** | `Reset Build (delete cache)` ← **必须**，否则 CMakeCache 里的旧绝对路径会直接报错 |
+| 出现莫名其妙的链接错误、怀疑缓存脏了 | `Reset Build (delete cache)` → `Ctrl+Shift+B` |
+| 只是想把产物清掉 | `Clean (Debug)` |
+
+### 输出颜色 / 中文乱码
+
+**用 `Ctrl+Shift+B`（终端）构建，不要用 CMake Tools 状态栏的 Build 按钮。**
+
+#### ① CMake Tools 的"输出"面板显示不了颜色
+
+CMake Tools 扩展把配置/构建输出写到 VSCode 的 **Output 面板**，而那个面板会把 ANSI
+转义序列当**普通文字**打印出来：
+
+```
+[cmake] -- [1;36m━━━ MCU 配置 ━━━━━━━━━━━━━━━━━━━[0m     ← 乱码，不是颜色
+```
+
+这是扩展 + 面板的限制，**没法让它显示颜色**。只有真正的**终端**才渲染 ANSI。
+
+#### ② 中文乱码：`[Console]::OutputEncoding` 没设成 UTF-8
+
+中文 Windows 控制台默认代码页是 **936（GBK）**，而 CMake 输出 UTF-8，
+于是 `生成 .hex / .bin` 变成 `鐢熸垚 .hex / .bin`。
+
+**踩过的坑：光敲 `chcp 65001` 修不好。** 实测确认：
+
+| 试过的办法 | 结果 |
+|---|---|
+| 终端里敲 `chcp 65001` | ❌ 还是乱码 |
+| 在 `settings.json` 里自定义一个"先 chcp"的终端 profile | ❌ 反而把终端搞坏了（见下面的教训） |
+| 终端里敲 `[Console]::OutputEncoding=[Text.Encoding]::UTF8` | ✅ **正常** |
+| `scripts/build.ps1`（内部设了上面这行） | ✅ 正常 |
+
+**原因**：`chcp` 改的是控制台代码页，而 PowerShell 启动时就已经把
+`[Console]::OutputEncoding` 初始化好了，**`chcp` 不会刷新这个 .NET 属性**。
+真正决定"PowerShell 怎么解码 cmake 的输出"的是后者。
+
+所以现在**每个 CMake 任务的命令前面都加了这一段**（8 个任务）：
+
+```jsonc
+"command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --preset Debug",
+```
+
+> ⚠️ 注意这段是 **PowerShell 语法**。本工程默认终端就是 PowerShell，所以没问题；
+> 如果哪天换成 cmd，要改成 `chcp 65001 >nul & cmake --preset Debug`。
+>
+> ⚠️ **另一个喂过血的教训：不要试图用自定义终端 profile 修这个。**
+> VSCode 是经 `cmd.exe` 拉起 profile 的，参数里只要有 `>` 就会被 cmd 当成重定向，
+> 结果任务直接报 `参数格式不正确 - -Command`，整个终端都用不了。
+> 修在**任务的 command 里**是安全的（直接交给 PowerShell 执行）。
+
+#### ③ 颜色从哪来
+
+| 输出内容 | 怎么上色 | 在哪能看见 |
+|---|---|---|
+| CMake 配置摘要 / 警告 | `CMakeLists.txt` 里的 ANSI 转义（`MCU_COLOR_OUTPUT`） | **终端** ✓ |
+| 编译器 warning / error | `CMAKE_COLOR_DIAGNOSTICS` → GCC 的 `-fdiagnostics-color=always` | **终端** ✓ |
+| 固件体积报告 | `cmake/report_size.cmake` | **终端** ✓ |
+
+`Build` / `Rebuild` 任务通过 `options.env` 打开它：
+
+```jsonc
+"options": { "env": { "MCU_COLOR_OUTPUT": "1" } }
+```
+
+`report_size.cmake` 同时认**运行时环境变量**和配置时写进去的值，所以不管上次是谁
+configure 的（终端任务还是 CMake Tools），在终端里构建都有颜色。
+
+> CMake Tools 那条路径永远是**干净纯文本**、不会出乱码 —— 因为 `MCU_COLOR_OUTPUT`
+> 用 `set()` 而**不是 `option()`**，**故意不写进 `CMakeCache.txt`**。
+
+#### 备用：`scripts/build.ps1`
+
+如果哪天终端里也没颜色了，还有个更彻底的办法 —— 这个脚本自己打印彩色摘要
+（**不经过 ninja，颜色一定生效**），并且强制 UTF-8：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1                 # Debug
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Preset Release
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Rebuild        # = Keil Rebuild
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Flash          # 编译 + 烧录
+```
+
+> 它**故意没有**接进 `tasks.json`：用 `-File <路径>` 调用时，工程路径里的括号
+> （`...(24G)...`）会被 PowerShell 拆坏，见上面那条警告。相对路径调用没问题。
+
+### 只想按一个键：`Ctrl+Shift+B`，或者绑成 F7
+
+`Ctrl+Shift+B` 本身就是**一个组合键**，直接跑默认构建任务 `Build (Debug)`。
+
+想更贴近 Keil 的手感，把 **F7** 绑上去 —— 把你的 `keybindings.json`
+（`Ctrl+Shift+P` → `Preferences: Open Keyboard Shortcuts (JSON)`）加上一条：
+
+```jsonc
+// F7 = 编译（和 Keil 一样）
+{ "key": "f7", "command": "workbench.action.tasks.build" },
+
+// 想指定具体任务就用这条
+// { "key": "f7", "command": "workbench.action.tasks.runTask", "args": "Build (Debug)" },
+```
+
+**分工建议**
+
+| 用途 | 用什么 |
+|---|---|
+| **构建 / 重编 / 烧录** | `Ctrl+Shift+B`、F7、或 `Tasks: Run Task` —— 走终端，有颜色 ✓ |
+| 切换 Debug / Release preset、看 CMake 状态 | CMake Tools 状态栏按钮 ✓（跟构建无关，用它没问题） |
+| 看警告 / 错误清单 | **Problems 面板**（`Ctrl+Shift+M`），构建时自动填 |
+
+> CMake Tools 状态栏那个 ▶ Build 按钮**能用，但输出是白的** —— 因为它走 Output 面板。
+> 想有颜色就别用它构建。
 
 ### 代码格式化（clang-format）
 

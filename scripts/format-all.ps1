@@ -42,7 +42,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
+    [string]$ProjectRoot,
     [switch]$Apply,
     [string[]]$ExcludeDirs = @('Drivers'),
 
@@ -54,6 +54,15 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# $PSScriptRoot is NOT reliably populated while parameters are being bound
+# (under Windows PowerShell 5.1 it was observed to be empty here), so the
+# default is resolved in the body instead. Falling back to the current
+# directory also makes it work when launched as a VSCode task, where the
+# working directory is already the project root.
+if (-not $ProjectRoot) {
+    $ProjectRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { (Get-Location).Path }
+}
 
 # -----------------------------------------------------------------------------
 # Locate clang-format

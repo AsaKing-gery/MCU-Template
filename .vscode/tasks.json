@@ -2,10 +2,28 @@
   "version": "2.0.0",
   "tasks": [
     {
+      // 命令开头那一段是给中文输出用的，别删：
+      //
+      //   中文 Windows 控制台默认代码页是 936（GBK），CMake 输出的是 UTF-8，
+      //   PowerShell 按 GBK 解码 → 「生成 .hex」显示成「鐢熸垚 .hex」。
+      //
+      //   注意：只敲 `chcp 65001` 【不够】（实测确认）。chcp 改的是控制台代码页，
+      //   而 PowerShell 启动时就已经把 [Console]::OutputEncoding 初始化好了，
+      //   chcp 不会刷新这个 .NET 属性。真正决定解码方式的是后者，必须显式设置。
+      //
+      // 这段写法只在 PowerShell 下有效 —— 本工程默认终端就是 PowerShell。
+      // 如果哪天把默认终端换成 cmd，要改成 `chcp 65001 >nul & ...`。
       "label": "Configure (Debug)",
       "type": "shell",
-      "command": "cmake --preset Debug",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --preset Debug",
       "problemMatcher": [],
+      // 只有真正的终端能渲染 ANSI 转义，所以在这里打开彩色输出。
+      // （CMake Tools 扩展的"输出"面板不渲染，那边保持关闭，避免出乱码）
+      "options": {
+        "env": {
+          "MCU_COLOR_OUTPUT": "1"
+        }
+      },
       "presentation": {
         "reveal": "silent",
         "panel": "shared"
@@ -14,17 +32,33 @@
     {
       "label": "Configure (Release)",
       "type": "shell",
-      "command": "cmake --preset Release",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --preset Release",
       "problemMatcher": [],
+      "options": {
+        "env": {
+          "MCU_COLOR_OUTPUT": "1"
+        }
+      },
       "presentation": {
         "reveal": "silent",
         "panel": "shared"
       }
     },
     {
+      // 默认构建任务，Ctrl+Shift+B 直接跑（也可以在 keybindings.json 里绑成 F7）。
+      //
+      // 命令开头那段和 Configure 里一样，是为了让中文不乱码（说明见上）。
+      //
+      // options.env 里的 MCU_COLOR_OUTPUT 是为了让 CMake 输出带颜色：
+      // 终端能渲染 ANSI，所以这里打开；CMake Tools 的"输出"面板不渲染，
+      // 那条路径靠 MCU_COLOR_OUTPUT 不落缓存来保持纯文本（见 CMakeLists.txt）。
+      //
+      // 注意：这里【不能】写 ${workspaceFolder} —— 工程路径含括号
+      // （JY.RFM-0A-U575(24G)-cmake）时，PowerShell 会把 (24G) 当子表达式拆开。
+      // cmake 命令本身不含路径，所以直接写就好。
       "label": "Build (Debug)",
       "type": "shell",
-      "command": "cmake --build --preset Debug",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --build --preset Debug",
       "dependsOrder": "sequence",
       "dependsOn": [
         "Configure (Debug)"
@@ -36,6 +70,11 @@
       "problemMatcher": [
         "$gcc"
       ],
+      "options": {
+        "env": {
+          "MCU_COLOR_OUTPUT": "1"
+        }
+      },
       "presentation": {
         "reveal": "always",
         "panel": "shared",
@@ -45,7 +84,7 @@
     {
       "label": "Build (Release)",
       "type": "shell",
-      "command": "cmake --build --preset Release",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --build --preset Release",
       "dependsOrder": "sequence",
       "dependsOn": [
         "Configure (Release)"
@@ -54,6 +93,11 @@
       "problemMatcher": [
         "$gcc"
       ],
+      "options": {
+        "env": {
+          "MCU_COLOR_OUTPUT": "1"
+        }
+      },
       "presentation": {
         "reveal": "always",
         "panel": "shared",
@@ -61,13 +105,21 @@
       }
     },
     {
+      // 对应 Keil 的 Rebuild：先删掉全部目标文件再重编。
+      // CMake 的依赖追踪比 Keil 准，平时用不到；
+      // 改了 CMakeLists / CMakePresets / mcu.json 之后跑一次最保险。
       "label": "Rebuild (clean-first)",
       "type": "shell",
-      "command": "cmake --build --preset Debug --clean-first",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --build --preset Debug --clean-first",
       "group": "build",
       "problemMatcher": [
         "$gcc"
       ],
+      "options": {
+        "env": {
+          "MCU_COLOR_OUTPUT": "1"
+        }
+      },
       "presentation": {
         "reveal": "always",
         "panel": "shared",
@@ -77,7 +129,7 @@
     {
       "label": "Clean (Debug)",
       "type": "shell",
-      "command": "cmake --build --preset Debug --target clean",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --build --preset Debug --target clean",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -89,7 +141,7 @@
       // configure 会直接报错。跑这个任务把缓存整个删掉即可。
       "label": "Reset Build (delete cache)",
       "type": "shell",
-      "command": "cmake -E remove_directory ${workspaceFolder}/build",
+      "command": "cmake -E remove_directory build",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -99,9 +151,14 @@
     {
       // 整个工程跑一遍 clang-format。默认是"预览"，只报告会改哪些文件、多少行。
       // 确认后跑 "Format All (apply)" 真正写入（会先备份到 %USERPROFILE%\.mcu-template-backup\）。
+      //
+      // 这里用相对路径 scripts/... 而不是 ${workspaceFolder}：任务的工作目录
+      // 默认就是工程根，而工程路径一旦含括号（如 JY.RFM-0A-U575(24G)-cmake），
+      // PowerShell 会把括号当子表达式，把命令拆坏。
+      // format-all.ps1 不传 -ProjectRoot 时默认就取脚本的上一级目录，正好是工程根。
       "label": "Format All (preview)",
       "type": "shell",
-      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/scripts/format-all.ps1\" -ProjectRoot \"${workspaceFolder}\"",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/format-all.ps1",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -111,7 +168,7 @@
     {
       "label": "Format All (apply)",
       "type": "shell",
-      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}/scripts/format-all.ps1\" -ProjectRoot \"${workspaceFolder}\" -Apply",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/format-all.ps1 -Apply",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -119,9 +176,16 @@
       }
     },
     {
+      // 只烧录，不调试。对应 Keil 的 "Download (F8)"。
+      //
+      // 日常更推荐直接按 F5：launch.json 里配了 "preLaunchTask": "Build (Debug)"，
+      // 所以 F5 = 编译 + 烧录 + 直接进调试，一步到位（对应 Keil 的 F5）。
+      //
+      // 注意：烧录和"构建/生成"是两件事 —— 构建只产出 .elf/.hex/.bin 文件，
+      // 不会碰芯片。要芯片里跑起来必须烧录（F5 或本任务）。
       "label": "Flash (OpenOCD)",
       "type": "shell",
-      "command": "cmake --build --preset Debug --target flash",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --build --preset Debug --target flash",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -131,7 +195,7 @@
     {
       "label": "Disassemble (.asm)",
       "type": "shell",
-      "command": "cmake --build --preset Debug --target disasm",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; cmake --build --preset Debug --target disasm",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -139,17 +203,18 @@
       }
     },
     {
+      // 相对路径，理由同上：工程路径含括号时 ${workspaceFolder} 会被 PowerShell 拆坏。
       "label": "MCU: Sync from mcu.json",
       "type": "shell",
-      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File ${workspaceFolder}/scripts/sync-mcu.ps1",
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/sync-mcu.ps1",
       "windows": {
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File ${workspaceFolder}/scripts/sync-mcu.ps1"
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-mcu.ps1"
       },
       "linux": {
-        "command": "bash ${workspaceFolder}/scripts/sync-mcu.sh"
+        "command": "bash scripts/sync-mcu.sh"
       },
       "osx": {
-        "command": "bash ${workspaceFolder}/scripts/sync-mcu.sh"
+        "command": "bash scripts/sync-mcu.sh"
       },
       "problemMatcher": [],
       "presentation": {

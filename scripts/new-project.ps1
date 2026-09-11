@@ -50,9 +50,9 @@ param(
     [string]$Svd,
     [string]$OpenocdTarget,
 
-    # 是否启用浮点 printf/scanf（对应 CubeIDE 的 -u _printf_float -u _scanf_float）。
-    # 默认开：关掉会让 printf("%f") 在运行时静默失效，很难查。
-    # 不需要就把 mcu.json 里的 "floatIo" 改成 false，能省约 14 KB flash。
+    # Enable float support in printf/scanf (CubeIDE's -u _printf_float -u _scanf_float).
+    # Default on: leaving it off makes printf("%f") silently fail at runtime.
+    # Set "floatIo": false in mcu.json to save roughly 14 KB of flash.
     [bool]$FloatIo = $true,
 
     [string[]]$Defines,
