@@ -204,6 +204,39 @@
       }
     },
     {
+      // 本地 CI：循环包含检查 -> 格式检查 -> Debug/Release 都编一遍 -> 体积统计。
+      // 提交前跑一次，跑不过就别提交。云端 .github/workflows/ci.yml 做的是同一件事。
+      //
+      // 体积门禁默认关闭（只看数字不卡人）。想卡住的话改成：
+      //   ... scripts/ci.ps1 -MaxFlashPercent 90 -MaxRamPercent 90
+      "label": "CI (full check)",
+      "type": "shell",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci.ps1",
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "options": {
+        "env": {
+          "MCU_COLOR_OUTPUT": "1"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      // 单独跑一遍包含关系检查（找循环包含），比完整 CI 快得多
+      "label": "Check: circular includes",
+      "type": "shell",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-includes.ps1",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
       // 相对路径，理由同上：工程路径含括号时 ${workspaceFolder} 会被 PowerShell 拆坏。
       "label": "MCU: Sync from mcu.json",
       "type": "shell",

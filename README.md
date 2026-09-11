@@ -840,3 +840,102 @@ powershell -ExecutionPolicy Bypass -File scripts/new-project.ps1 <已有工程�
 - 模板里只放**通用**的东西；任何芯片专属的值都进 `mcu.json`。
 - 新增的构建开关用 `option()` 暴露，不要硬编码进 `CMakeLists.txt`。
 - 想同步 VSCode 扩展与全局设置到多台机器，用 VSCode 的 **Settings Sync** 或 **Profiles**（`Profiles: Export Profile`）。
+
+---
+
+## 十二、CI（持续集成）
+
+### 嵌入式项目的 CI 能做什么、不能做什么
+
+| 能做（纯软件，不需要硬件） | 不能做（必须有板子） |
+|---|---|
+| **Debug / Release 都能编过** —— 防止"我本地能编" | 烧录 |
+| **固件体积不超标** —— 有人加个大数组撑爆 FLASH，CI 直接拦住 | 上板测试 |
+| **没有循环包含** —— 它能让编辑器补全失效，但编译照样过 | 硬件在环（HIL） |
+| **格式一致** —— 强制 clang-format | 真实外设行为验证 |
+| **每个提交都留一份 .elf/.hex/.bin** —— 随时回滚固件 | |
+
+一句话：**CI 保证"能编、体积不炸、代码健康"，硬件相关留在你本地 F5。**
+
+### 本地：`scripts/ci.ps1`（提交前跑这个）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/ci.ps1
+```
+
+它会依次做四件事，任何一件不过就返回非 0：
+
+```
+=== 1/4  circular includes ===      循环包含检查
+=== 2/4  clang-format ===           格式检查（有一处没格式化就失败）
+=== 3/4  build (Debug/Release) ===  两个配置都编一遍，统计 warning 数
+=== 4/4  firmware size ===          FLASH / RAM 占用
+```
+
+常用参数：
+
+```powershell
+# 体积门禁：超过就失败（默认 0 = 只看数字不卡人）
+powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -MaxFlashPercent 90 -MaxRamPercent 90
+
+# 从零开始构建（模拟 CI 机器）
+powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -Fresh
+
+# 只跑一部分
+powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -SkipFormat
+powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -SkipIncludes -Presets Debug
+```
+
+VSCode 里也能跑：`Ctrl+Shift+P` → `Tasks: Run Task` → **`CI (full check)`**。
+
+### 相关脚本
+
+| 脚本 | 作用 |
+|---|---|
+| `scripts/ci.ps1` | 完整流水线（上面那四步） |
+| `scripts/check-includes.ps1` | 单独查循环包含，会打印出**每一个环的完整路径** |
+| `scripts/format-all.ps1 -Strict` | 单独做格式检查（有不一致就返回非 0） |
+
+### `.format-exclude`：哪些代码不检查
+
+厂商代码（ST 的 HAL/LL、FatFs、CMSIS-DSP）**不参与**格式检查和包含检查。
+清单写在工程根的 **`.format-exclude`** 里：
+
+```
+# 一行一条，只能整行注释
+Drivers/                结尾带斜杠 = 跳过这个目录
+User/Src/Libraries/
+sd_card/FATFS/
+arm_math.h              不带斜杠 = 按文件名匹配（支持通配符）
+```
+
+为什么必须排除厂商代码：格式化它们会导致 diff 失控（实测某工程：不排除 +114461 行，
+排除后降到 +18282 行），而且以后没法跟上游版本对比。
+
+### 云端：`.github/workflows/ci.yml`
+
+推到 GitHub 后会自动跑（`push` / `pull_request` / 手动触发都行）：
+
+1. 装 `gcc-arm-none-eabi` + `cmake` + `ninja`
+2. `cmake --preset Debug` → 构建
+3. `cmake --preset Release` → 构建
+4. 统计 FLASH / RAM（想卡住就把 workflow 里的 `BUDGET=0` 改成 `90` 之类）
+5. 把 `.elf/.hex/.bin/.map` 作为 artifact 上传（保留 90 天）
+
+> ⚠️ **首次运行可能失败在 Linux 的大小写敏感上**：Windows 不区分大小写，
+> 所以 `#include "Uart5.h"` 这种写错大小写的代码在 Windows 能编过、在 Linux 报错。
+> 这是**有价值的反馈**，按报错把 include 大小写改对即可。
+>
+> ⚠️ 云端只做"构建 + 体积"（PowerShell 检查脚本在 Linux 上要额外装 pwsh，不划算）；
+> 循环包含和格式检查请在**本地**用 `ci.ps1` 跑。
+
+### 用起来的最低成本方案
+
+还没有 git 仓库的话，**先只用 `scripts/ci.ps1`**：
+
+```
+改完代码 → 跑一次 scripts/ci.ps1 → 绿了再提交
+```
+
+等你把工程推到 GitHub，把 `.github/workflows/ci.yml` 一起推上去就自动生效 ——
+它做的是同一件事，只是换了个触发的地方。

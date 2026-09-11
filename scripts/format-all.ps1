@@ -44,6 +44,10 @@
 param(
     [string]$ProjectRoot,
     [switch]$Apply,
+
+    # CI mode: in preview mode, exit non-zero when anything needs reformatting,
+    # so a build pipeline can gate on it. Has no effect together with -Apply.
+    [switch]$Strict,
     [string[]]$ExcludeDirs = @('Drivers'),
 
     # Wildcard patterns matched against the file NAME, for vendor code that sits
@@ -95,6 +99,46 @@ if (-not $cf) {
 $root = (Resolve-Path -LiteralPath $ProjectRoot).Path
 
 # -----------------------------------------------------------------------------
+# Optional per-project exclude list: <root>/.format-exclude
+#
+#   # comment
+#   Drivers/            <- a trailing slash marks a directory to skip
+#   Middlewares/
+#   sd_card/FATFS/
+#   arm_math.h          <- anything else is a file-name glob
+#
+# Kept in a file rather than always passing -ExcludeDirs, so that running the
+# script with no arguments - which is exactly what CI does - already skips your
+# vendor code instead of reporting 80+ vendor files as "needs reformatting".
+# -----------------------------------------------------------------------------
+$excludeFile = Join-Path $root '.format-exclude'
+if (Test-Path -LiteralPath $excludeFile) {
+    $dirs = New-Object System.Collections.ArrayList
+    foreach ($d in $ExcludeDirs) { [void]$dirs.Add($d) }
+    $filePatterns = New-Object System.Collections.ArrayList
+    foreach ($p in $ExcludeFiles) { [void]$filePatterns.Add($p) }
+
+    foreach ($line in [System.IO.File]::ReadAllLines($excludeFile)) {
+        $l = $line.Trim()
+        if (-not $l -or $l.StartsWith('#')) { continue }
+        if ($l.EndsWith('/') -or $l.EndsWith('\')) {
+            $d = $l.TrimEnd('/', '\')
+            # compare with normalised separators, otherwise the built-in default
+            # ("User\Src\Libraries") and the file entry ("User/Src/Libraries")
+            # both survive and get printed twice
+            $dn = $d -replace '/', '\'
+            $dup = $false
+            foreach ($x in $dirs) { if (($x -replace '/', '\') -eq $dn) { $dup = $true; break } }
+            if (-not $dup) { [void]$dirs.Add($d) }
+        } else {
+            [void]$filePatterns.Add($l)
+        }
+    }
+    $ExcludeDirs = $dirs.ToArray()
+    $ExcludeFiles = $filePatterns.ToArray()
+}
+
+# -----------------------------------------------------------------------------
 # Locate the style file
 #
 # Must be an explicit path: we format a temp copy, so letting clang-format
@@ -136,9 +180,14 @@ $files = @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction Silently
         if ($_.Name -match '^_tmp') { return $false }
 
         # skip vendor directories such as Drivers/
-        $rel = $_.FullName.Substring($root.Length).TrimStart('\', '/')
+        # Normalise separators before comparing: .format-exclude is normally
+        # written with forward slashes ("User/Src/Libraries/"), while the
+        # relative path here uses backslashes on Windows. Comparing them raw
+        # silently matches nothing.
+        $rel = $_.FullName.Substring($root.Length).TrimStart('\', '/') -replace '/', '\'
         foreach ($d in $ExcludeDirs) {
-            if ($rel -like "$d\*" -or $rel -like "$d/*") { return $false }
+            $dn = $d.TrimEnd('\', '/') -replace '/', '\'
+            if ($rel -like "$dn\*") { return $false }
         }
         foreach ($pat in $ExcludeFiles) {
             if ($_.Name -like $pat) { return $false }
@@ -243,6 +292,11 @@ if ($hasGit -and $changedFiles -gt 0) {
 if (-not $Apply) {
     Write-Host ''
     Write-Host 'DRY RUN - nothing was written. Re-run with -Apply to format (a backup is made first).' -ForegroundColor Yellow
+    if ($Strict -and $changedFiles -gt 0) {
+        Write-Host ''
+        Write-Host "Strict mode: $changedFiles file(s) are not formatted - failing." -ForegroundColor Red
+        exit 1
+    }
 } elseif ($changedFiles -gt 0) {
     Write-Host ''
     Write-Host 'Formatted. Originals backed up to:' -ForegroundColor Green

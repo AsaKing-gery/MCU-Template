@@ -144,8 +144,9 @@ if (Test-Path -LiteralPath $targetRoot) {
 # 4. Copy template files
 # -----------------------------------------------------------------------------
 $entries = @(
-    '.vscode', 'cmake', 'scripts', 'App', '.svd',
-    '.clangd', '.clang-format', '.gitignore', 'CMakeLists.txt', 'CMakePresets.json'
+    '.vscode', 'cmake', 'scripts', 'App', '.svd', '.github',
+    '.clangd', '.clang-format', '.format-exclude', '.gitignore',
+    'CMakeLists.txt', 'CMakePresets.json'
 )
 
 foreach ($entry in $entries) {

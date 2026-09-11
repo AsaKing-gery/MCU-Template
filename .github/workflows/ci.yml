@@ -1,0 +1,95 @@
+# =============================================================================
+#  GitHub Actions：嵌入式固件 CI
+#
+#  能做什么（纯软件，不需要硬件）：
+#    * 证明 Debug / Release 两个配置都能编过
+#    * 统计 FLASH / RAM 占用（超标可以直接失败，见下面的 budget 步骤）
+#    * 每个提交都留一份 .elf / .hex / .bin 产物，随时能回滚到任何一版固件
+#
+#  不能做什么（必须有板子）：
+#    * 烧录、上板测试、HIL
+#
+#  注意：本地还有更全的检查（循环包含 + clang-format），在 scripts/ci.ps1 里，
+#  它需要 PowerShell 7，装起来比较绕，所以没放进这个 workflow。
+#  提交前在本地跑一次 scripts/ci.ps1 即可。
+#
+#  ⚠️ 首次运行可能会失败在 Linux 的大小写敏感上：Windows 文件系统不区分大小写，
+#     所以 `#include "Uart5.h"` 这种大小写写错的文件在 Windows 能编过、在 Linux 报错。
+#     这属于有价值的反馈，遇到就按报错把 include 的大小写改对。
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi cmake ninja-build
+
+      - name: Show versions
+        run: |
+          arm-none-eabi-gcc --version | head -1
+          cmake --version | head -1
+          ninja --version
+
+      - name: Configure (Debug)
+        run: cmake --preset Debug
+
+      - name: Build (Debug)
+        run: cmake --build --preset Debug
+
+      - name: Configure (Release)
+        run: cmake --preset Release
+
+      - name: Build (Release)
+        run: cmake --build --preset Release
+
+      # 固件体积 + 预算门禁。
+      # 想启用：把 BUDGET 改成百分比（例如 90 = 超过 90% 直接失败）。
+      # 只想看数字不想卡：保持 0。
+      - name: Firmware size
+        run: |
+          BUDGET=0
+          for preset in Debug Release; do
+            elf=$(ls build/$preset/*.elf | head -1)
+            echo "--- $preset : $(basename "$elf") ---"
+            size_tool=$(grep '^CMAKE_SIZE:FILEPATH=' build/$preset/CMakeCache.txt | cut -d= -f2)
+            "$size_tool" "$elf"
+            if [ "$BUDGET" -gt 0 ]; then
+              used=$("$size_tool" "$elf" | tail -1 | awk '{print $1+$2}')
+              total=$(grep -m1 -E '^FLASH[[:space:]]+0x[0-9a-fA-F]+[[:space:]]+0x([0-9a-fA-F]+)' "build/$preset"/*.map | awk '{print strtonum($3)}')
+              pct=$(( used * 100 / total ))
+              echo "FLASH ${pct}%"
+              if [ "$pct" -gt "$BUDGET" ]; then
+                echo "::error::FLASH usage ${pct}% exceeds budget ${BUDGET}%"
+                exit 1
+              fi
+            fi
+          done
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.sha }}
+          path: |
+            build/Debug/*.elf
+            build/Debug/*.hex
+            build/Debug/*.bin
+            build/Debug/*.map
+            build/Release/*.elf
+            build/Release/*.hex
+            build/Release/*.bin
+            build/Release/*.map
+          if-no-files-found: error
+          retention-days: 90
