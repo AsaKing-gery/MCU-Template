@@ -31,7 +31,19 @@ on:
   push:
     branches: [main, master, develop]
   pull_request:
+  # 手动触发：Actions 页面 → 左侧选这个 workflow → 右侧 "Run workflow"
   workflow_dispatch:
+  # 定时触发：不依赖谁 push，定期确认工具链和依赖还编得过
+  #   —— 上游 apt 包升级、runner 镜像变化这类"代码没动却突然编不过"的问题靠它发现。
+  # 注意 cron 用的是 UTC：下面这行 = 北京时间每周一 09:00
+  schedule:
+    - cron: '0 1 * * 1'
+
+# 同一个分支的连续 push 只跑最后一次（省 runner 额度）；
+# 把 event_name 也算进分组，避免定时任务把正在跑的 push 构建顶掉。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
 
 jobs:
   self-check:

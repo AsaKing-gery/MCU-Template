@@ -1,20 +1,33 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
-title: ''
-labels: ''
+name: 功能建议
+about: 想要新功能，或者觉得哪里用起来别扭
+title: '[Feature] '
+labels: enhancement
 assignees: ''
-
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+## 你想解决什么问题
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+先说问题，再说方案 —— 有时候问题本身有更简单的解法。
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+> 例："每次新建工程都要手动改 `mcu.json` 里的 defines，很烦"
+> 比 "给 `new-project.ps1` 加一个 `-Defines` 参数" 更容易讨论。
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+## 你希望的方案
+
+## 你考虑过的其它方案
+
+（也可以是"我现在的临时做法是什么"）
+
+## 影响范围
+
+- [ ] 只影响我自己的某个工程
+- [ ] 会影响模板本身（所有新工程都会跟着变）
+- [ ] 不确定
+
+> 如果是第二种，说明这个改动会进 `tools/` 或 `cmake/`，
+> 那它会**被 `new-project` 复制到每一个新工程**里，需要更谨慎一点。
+
+## 补充
+
+其它上下文、参考实现、截图等。

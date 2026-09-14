@@ -1,18 +1,25 @@
 # =============================================================================
-#  GitHub Actions：打 tag 自动发版
+#  GitHub Actions：打 tag 自动发版（编译 → 人工审批 → 发布）
 #
 #  触发：push 形如 v1.0.1 的 tag（也可在 Actions 页面手动 Run workflow）
 #
 #  ⚠️ 打 tag 之前，必须先把本文件提交并推送上去。
 #     workflow 用的是「被 tag 的那个提交」里的版本 —— 文件还没推，tag 就等于白发。
 #
+#  两个 job：
+#     1. build    —— tag 一推就立刻编译打包，不等任何人
+#     2. publish  —— 挂在 release environment 上，**需要人工点 Approve 才会跑**
+#
+#  ⚠️ 「等待审批」这个闸门是由【仓库设置】决定的：
+#       Settings → Environments → 新建一个名叫 release 的环境
+#                              → 勾上 Required reviewers → 选上你自己
+#     没有配 reviewers 的话，publish 会直接跑，等于没有审批。
+#     （详见文件末尾的说明）
+#
 #  产出（挂在 Releases 页面的 Assets 里）：
 #     <产物名>-v1.0.1-debug.bin / .hex / .elf / .map
 #     <产物名>-v1.0.1-release.bin / .hex / .elf / .map
 #     SHA256SUMS.txt                       ← 烧录前核对用
-#
-#  这个文件会被 tools/project/new-project 一起复制到新工程，
-#  所以每个新工程都自带发版能力，不需要额外配置。
 # =============================================================================
 name: Release
 
@@ -22,15 +29,25 @@ on:
       - 'v*'
   workflow_dispatch:
 
-# 默认的 GITHUB_TOKEN 在 workflow 里是【只读】的，创建 Release 必须显式放开写权限。
-# 少了这一段，最后一步会报 "Resource not accessible by integration"。
+# 默认只给读权限；真正需要写权限的只有 publish 那一步，在 job 级别单独放开。
+# 这样即使构建脚本被人塞了后门，它也拿不到仓库写权限。
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false      # 发版不允许被后来的运行中途取消
 
 jobs:
-  release:
-    name: 编译并发布固件
+  # ===========================================================================
+  # 1) 编译 —— tag 一推就跑，不等人
+  # ===========================================================================
+  build:
+    name: 编译固件
     runs-on: ubuntu-latest
+
+    outputs:
+      buildable: ${{ steps.probe.outputs.buildable }}
 
     steps:
       - uses: actions/checkout@v4
@@ -112,23 +129,55 @@ jobs:
           echo "--- dist ---"
           ls -l dist
 
-      # 无论 tag 还是手动触发都留一份 artifact，方便手动下载
-      - name: 上传到 Actions artifacts
+      # 编译产物在 job 之间只能靠 artifact 传递（两个 job 跑在不同的机器上）
+      - name: 上传编译产物给下一个 job
         if: steps.probe.outputs.buildable == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ github.ref_name }}-${{ github.sha }}
+          name: firmware-${{ github.run_number }}
           path: dist/*
           if-no-files-found: error
           retention-days: 90
 
-      # -----------------------------------------------------------------------
-      # 发布到 Releases 页面。
-      # 只用 runner 上自带的 gh CLI，不引第三方 action，少一层供应链风险。
-      # 手动触发（非 tag）时只留 artifact，不发 Release，可以当"预演"用。
-      # -----------------------------------------------------------------------
-      - name: 发布到 GitHub Release
-        if: steps.probe.outputs.buildable == 'true' && startsWith(github.ref, 'refs/tags/')
+  # ===========================================================================
+  # 2) 发布 —— 需要人工审批
+  #
+  # 这个 job 挂了 environment: release。只要那个 environment 配了
+  # Required reviewers，它就会停在 "Waiting for approval"，
+  # 直到有人点 Approve 才拿到 runner 开始跑。
+  # 审批期间你收到的是 GitHub 的通知邮件，直接在邮件里就能批。
+  # ===========================================================================
+  publish:
+    name: 发布 Release（需人工审批）
+    needs: build
+    # 只在 tag 推送、且确实是可构建的固件工程时才进入审批
+    if: startsWith(github.ref, 'refs/tags/') && needs.build.outputs.buildable == 'true'
+    runs-on: ubuntu-latest
+
+    environment:
+      name: release
+      url: ${{ steps.publish.outputs.url }}
+
+    # 只有这一步需要写仓库内容的权限（创建 Release）
+    permissions:
+      contents: write
+
+    steps:
+      - name: 取回编译产物
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-${{ github.run_number }}
+          path: dist
+
+      - name: 预览将要发布的文件（审批通过后第一件事就会看到）
+        run: |
+          set -euo pipefail
+          echo "版本: ${GITHUB_REF_NAME}"
+          echo "--- 即将发布到 Release 的附件 ---"
+          ls -l dist
+
+      - name: 创建 / 更新 Release
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -136,7 +185,7 @@ jobs:
           VER="${GITHUB_REF_NAME}"
 
           if gh release view "$VER" >/dev/null 2>&1; then
-            echo "Release $VER 已存在 —— 追加固件（同名文件覆盖）"
+            echo "Release $VER 已存在 —— 更新附件（同名文件覆盖）"
             gh release upload "$VER" dist/* --clobber
           else
             echo "创建 Release $VER"
@@ -145,3 +194,20 @@ jobs:
               --generate-notes \
               --verify-tag
           fi
+
+          url="$(gh release view "$VER" --json url -q .url)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "已发布: $url"
+
+# =============================================================================
+#  一次性设置：开启人工审批
+#
+#  仓库 → Settings → Environments → New environment → 名字填 release → 保存
+#    → 勾选 "Required reviewers" → 填上自己的 GitHub 账号 → Save protection rules
+#
+#  之后 publish 这个 job 就会停在 Waiting for approval。
+#  想加"发版必须两个人点头"，把第二个账号也加进 reviewers 即可（全部批准才放行）。
+#
+#  注意：没配置这个 environment 时，GitHub 会在首次运行时自动建一个【没有保护规则】的
+#  environment —— publish 会直接跑，看起来就像审批功能没生效。所以这一步必须手动做。
+# =============================================================================
