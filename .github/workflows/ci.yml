@@ -95,7 +95,7 @@ jobs:
           fi
 
           echo "===== 3/4 必备文件清单 ====="
-          missing=0
+          missing=""
           for f in \
               .clang-format .clangd .gitignore CMakeLists.txt CMakePresets.json mcu.json \
               cmake/gcc-arm-none-eabi.cmake cmake/report_size.cmake cmake/disasm.cmake \
@@ -112,11 +112,19 @@ jobs:
               echo "  OK      $f"
             else
               echo "  MISSING $f"
-              missing=1
+              missing="$missing $f"
             fi
           done
-          if [ "$missing" -ne 0 ]; then
-            echo "::error::模板缺少必需文件，新建工程会拿到不完整的骨架"
+          if [ -n "$missing" ]; then
+            echo ""
+            echo "::error::模板缺少必需文件，新建工程会拿到不完整的骨架："
+            for f in $missing; do
+              echo "::error::  MISSING $f"
+            done
+            echo "  常见原因：文件在本地存在，但没有被提交进 git"
+            echo "  （多半是 .gitignore 把它所在的目录一起忽略了）。"
+            echo "  用下面这条命令能查出是哪条规则命中的："
+            echo "      git check-ignore -v <文件路径>"
             exit 1
           fi
 

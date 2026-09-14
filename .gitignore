@@ -1,6 +1,9 @@
 # ---- 构建产物 ----
-build/
-cmake-build-*/
+# 注意开头的 "/"：gitignore 里不带斜杠的 "build/" 会匹配**任意层级**的 build 目录，
+# 那样会把 tools/build/（存放 build.ps1 的目录）一起忽略掉 —— 文件在本地好好的，
+# 一提交就"消失"，云端 CI 直接报缺文件。CMake 的构建目录固定在工程根，锚定即可。
+/build/
+/cmake-build-*/
 compile_commands.json
 
 # 冒烟测试（tools/check/ci-smoke.sh）在 CI 里生成的临时工程，
