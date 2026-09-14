@@ -194,27 +194,39 @@ jobs:
           echo "--- 即将挂到 Release 上的附件 ---"
           ls -l dist
 
+      # 注意：这个 job【故意不做 checkout】—— 它只需要上一个 job 传过来的固件产物。
+      # 但这样一来当前目录里就没有 .git，而 gh 默认靠 git remote 判断"要操作哪个仓库"，
+      # 会直接报：
+      #     failed to run git: fatal: not a git repository (or any of the parent directories): .git
+      # 所以必须显式告诉它仓库是谁 —— 下面两处都是为此：
+      #   * GH_REPO 环境变量：覆盖 gh 的仓库探测，所有 gh 子命令都生效
+      #   * 查 Release 时用 gh api 的完整路径 repos/<owner>/<repo>/...
       - name: 创建 / 更新 Release 草稿
         id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           VER="${GITHUB_REF_NAME}"
 
-          if gh release view "$VER" >/dev/null 2>&1; then
+          # 用 API 直接查这个 tag 有没有对应的 Release。
+          # 比 `gh release view` 更明确：404 就是 404，不会把别的错误也当成"不存在"。
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${VER}" >/dev/null 2>&1; then
             echo "Release $VER 已存在 —— 更新附件（同名文件覆盖）"
-            gh release upload "$VER" dist/* --clobber
+            gh release upload "$VER" dist/* --clobber --repo "$GITHUB_REPOSITORY"
           else
             echo "创建 Release $VER（草稿）"
+            # --repo 和上面的 GH_REPO 是双保险：都用来避免 gh 去当前目录找 .git
             gh release create "$VER" dist/* \
               --draft \
               --title "$VER" \
               --generate-notes \
-              --verify-tag
+              --verify-tag \
+              --repo "$GITHUB_REPOSITORY"
           fi
 
-          url="$(gh release view "$VER" --json url -q .url)"
+          url="$(gh release view "$VER" --json url -q .url --repo "$GITHUB_REPOSITORY")"
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
           # 日志里也要讲清楚：多数人只看日志，不看 Summary 标签页
@@ -235,7 +247,7 @@ jobs:
             echo ""
             echo "  不想发就点 'Delete' 把草稿删掉，对已有版本没有任何影响。"
             echo "=============================================================="
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "草稿地址: $url"
 
 # =============================================================================
