@@ -1,21 +1,29 @@
 # =============================================================================
-#  GitHub Actions：嵌入式固件 CI
+#  GitHub Actions：模板自检
 #
-#  能做什么（纯软件，不需要硬件）：
-#    * 证明 Debug / Release 两个配置都能编过
-#    * 统计 FLASH / RAM 占用（超标可以直接失败，见下面的 budget 步骤）
-#    * 每个提交都留一份 .elf / .hex / .bin 产物，随时能回滚到任何一版固件
+#  这个仓库是**模板 / 骨架**，不是固件工程。它没有链接脚本，也没有 newlib 的
+#  系统调用桩，所以直接在仓库里 cmake configure/build 是过不去的 ——
+#  会红在链接阶段：
+#      undefined reference to `_getpid' / `_fstat' / `_isatty'
+#      collect2: error: ld returned 1 exit status
+#  （因为 mcu.json 的 floatIo=true 会把 newlib-nano 的 stdio 强链进来，
+#    那些桩就变成必需的了。真实工程里这份由 CubeMX 生成的 syscalls.c 提供。）
 #
-#  不能做什么（必须有板子）：
-#    * 烧录、上板测试、HIL
+#  所以本工作流验证的是「模板本身还好不好用」，分两层：
 #
-#  注意：本地还有更全的检查（循环包含 + clang-format），在 scripts/ci.ps1 里，
-#  它需要 PowerShell 7，装起来比较绕，所以没放进这个 workflow。
-#  提交前在本地跑一次 scripts/ci.ps1 即可。
+#    A. 静态自检 —— 配置/脚本层面的低级错误，几秒内发现
+#         * JSON 能解析（mcu.json / CMakePresets.json）
+#         * shell 脚本语法（bash -n）/ PowerShell 脚本可解析
+#         * 新建工程会复制的文件是否都在（之前就漏过 .clang-format）
+#         * mcu.json 的关键字段是否齐全（缺了工具链文件会直接 FATAL_ERROR）
 #
-#  ⚠️ 首次运行可能会失败在 Linux 的大小写敏感上：Windows 文件系统不区分大小写，
-#     所以 `#include "Uart5.h"` 这种大小写写错的文件在 Windows 能编过、在 Linux 报错。
-#     这属于有价值的反馈，遇到就按报错把 include 的大小写改对。
+#    B. 端到端冒烟 —— scripts/ci-smoke.sh
+#         复制模板骨架 + 叠加 ci/smoke 里的最小裸机固件，真的编出
+#         Debug/Release 固件，并断言 .elf/.hex/.bin/.map 都产出了。
+#         它验证的是模板的核心承诺：**复制出去就能编**。
+#
+#  注意：这里**不检查代码格式**。格式化属于本地流程（scripts/ci.ps1），
+#  而且对 GBK 文件和厂商代码需要额外处理，不适合放在云端。
 # =============================================================================
 name: CI
 
@@ -26,70 +34,122 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  self-check:
+    name: 模板自检
     runs-on: ubuntu-latest
+
+    env:
+      # 让冒烟脚本把工程建在这里，产物才留得住、能上传成 artifact
+      SMOKE_WORKDIR: ${{ github.workspace }}/ci-out
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install toolchain
+      - name: 安装工具链
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-arm-none-eabi cmake ninja-build
-
-      - name: Show versions
-        run: |
+          echo "--- 版本 ---"
           arm-none-eabi-gcc --version | head -1
           cmake --version | head -1
           ninja --version
 
-      - name: Configure (Debug)
-        run: cmake --preset Debug
-
-      - name: Build (Debug)
-        run: cmake --build --preset Debug
-
-      - name: Configure (Release)
-        run: cmake --preset Release
-
-      - name: Build (Release)
-        run: cmake --build --preset Release
-
-      # 固件体积 + 预算门禁。
-      # 想启用：把 BUDGET 改成百分比（例如 90 = 超过 90% 直接失败）。
-      # 只想看数字不想卡：保持 0。
-      - name: Firmware size
+      # -----------------------------------------------------------------------
+      #  A. 静态自检
+      # -----------------------------------------------------------------------
+      - name: 配置检查（JSON / 脚本语法 / 必备文件 / mcu.json 字段）
         run: |
-          BUDGET=0
-          for preset in Debug Release; do
-            elf=$(ls build/$preset/*.elf | head -1)
-            echo "--- $preset : $(basename "$elf") ---"
-            size_tool=$(grep '^CMAKE_SIZE:FILEPATH=' build/$preset/CMakeCache.txt | cut -d= -f2)
-            "$size_tool" "$elf"
-            if [ "$BUDGET" -gt 0 ]; then
-              used=$("$size_tool" "$elf" | tail -1 | awk '{print $1+$2}')
-              total=$(grep -m1 -E '^FLASH[[:space:]]+0x[0-9a-fA-F]+[[:space:]]+0x([0-9a-fA-F]+)' "build/$preset"/*.map | awk '{print strtonum($3)}')
-              pct=$(( used * 100 / total ))
-              echo "FLASH ${pct}%"
-              if [ "$pct" -gt "$BUDGET" ]; then
-                echo "::error::FLASH usage ${pct}% exceeds budget ${BUDGET}%"
-                exit 1
-              fi
-            fi
+          set -euo pipefail
+
+          echo "===== 1/4 JSON 配置可解析 ====="
+          python3 -c "
+          import json, sys
+          bad = 0
+          for p in ('mcu.json', 'CMakePresets.json'):
+              try:
+                  json.load(open(p, encoding='utf-8'))
+                  print('  OK    ' + p)
+              except Exception as exc:
+                  print('  FAIL  ' + p + ': ' + str(exc))
+                  bad = 1
+          print('  （.vscode/*.json 不校验：VSCode 允许 JSONC 注释，不是严格 JSON）')
+          sys.exit(bad)
+          "
+
+          echo "===== 2/4 shell 脚本语法 ====="
+          for f in scripts/*.sh; do
+            bash -n "$f"
+            echo "  OK    $f"
           done
 
-      - name: Upload firmware artifacts
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "===== PowerShell 脚本可解析 ====="
+            for f in scripts/*.ps1; do
+              pwsh -NoProfile -NonInteractive -Command \
+                "[void][ScriptBlock]::Create((Get-Content -Raw -LiteralPath '$f'))"
+              echo "  OK    $f"
+            done
+          else
+            echo "  （runner 上没有 pwsh，跳过 PowerShell 检查）"
+          fi
+
+          echo "===== 3/4 必备文件清单 ====="
+          missing=0
+          for f in \
+              .clang-format .clangd .gitignore CMakeLists.txt CMakePresets.json mcu.json \
+              cmake/gcc-arm-none-eabi.cmake cmake/report_size.cmake cmake/disasm.cmake \
+              scripts/new-project.ps1 scripts/new-project.sh \
+              scripts/sync-mcu.ps1 scripts/sync-mcu.sh \
+              scripts/setup-env.ps1 scripts/fix-encoding.ps1 \
+              scripts/format-all.ps1 scripts/build.ps1 \
+              scripts/ci.ps1 scripts/check-includes.ps1 scripts/ci-smoke.sh \
+              .vscode/settings.json .vscode/launch.json \
+              .vscode/tasks.json .vscode/extensions.json \
+              ci/smoke/Core/Src/main.c ci/smoke/Core/Src/syscalls.c \
+              ci/smoke/Core/Startup/startup_smoke.s ci/smoke/STM32F407VGTx_FLASH.ld ; do
+            if [ -e "$f" ]; then
+              echo "  OK      $f"
+            else
+              echo "  MISSING $f"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::模板缺少必需文件，新建工程会拿到不完整的骨架"
+            exit 1
+          fi
+
+          echo "===== 4/4 mcu.json 关键字段 ====="
+          python3 -c "
+          import json, sys
+          d = json.load(open('mcu.json', encoding='utf-8'))
+          need = ('device', 'cpu', 'fpu', 'floatAbi', 'linkerScript', 'svd', 'openocdTarget')
+          miss = [k for k in need if k not in d]
+          for k in need:
+              print(('  OK    ' if k in d else '  MISS  ') + k + ' = ' + str(d.get(k)))
+          if miss:
+              print('::error::mcu.json 缺少字段 ' + ', '.join(miss) + '（工具链文件会因此 FATAL_ERROR）')
+              sys.exit(1)
+          "
+
+      # -----------------------------------------------------------------------
+      #  B. 端到端冒烟
+      # -----------------------------------------------------------------------
+      - name: 冒烟构建（复制模板骨架 + 最小固件 → Debug/Release）
+        run: bash scripts/ci-smoke.sh
+
+      - name: 上传固件产物
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ github.sha }}
+          name: smoke-firmware-${{ github.sha }}
           path: |
-            build/Debug/*.elf
-            build/Debug/*.hex
-            build/Debug/*.bin
-            build/Debug/*.map
-            build/Release/*.elf
-            build/Release/*.hex
-            build/Release/*.bin
-            build/Release/*.map
+            ci-out/build/Debug/*.elf
+            ci-out/build/Debug/*.hex
+            ci-out/build/Debug/*.bin
+            ci-out/build/Debug/*.map
+            ci-out/build/Release/*.elf
+            ci-out/build/Release/*.hex
+            ci-out/build/Release/*.bin
+            ci-out/build/Release/*.map
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 30
