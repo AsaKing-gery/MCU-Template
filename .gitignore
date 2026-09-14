@@ -10,6 +10,9 @@ compile_commands.json
 # 用来把固件产物留下来做 artifact
 ci-out/
 
+# 发版打包产物（.github/workflows/release.yml 里的 dist/，本地跑时用）
+/dist/
+
 # ---- 固件与中间文件 ----
 *.elf
 *.hex

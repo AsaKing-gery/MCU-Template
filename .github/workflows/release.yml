@@ -1,0 +1,147 @@
+# =============================================================================
+#  GitHub Actions：打 tag 自动发版
+#
+#  触发：push 形如 v1.0.1 的 tag（也可在 Actions 页面手动 Run workflow）
+#
+#  ⚠️ 打 tag 之前，必须先把本文件提交并推送上去。
+#     workflow 用的是「被 tag 的那个提交」里的版本 —— 文件还没推，tag 就等于白发。
+#
+#  产出（挂在 Releases 页面的 Assets 里）：
+#     <产物名>-v1.0.1-debug.bin / .hex / .elf / .map
+#     <产物名>-v1.0.1-release.bin / .hex / .elf / .map
+#     SHA256SUMS.txt                       ← 烧录前核对用
+#
+#  这个文件会被 tools/project/new-project 一起复制到新工程，
+#  所以每个新工程都自带发版能力，不需要额外配置。
+# =============================================================================
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# 默认的 GITHUB_TOKEN 在 workflow 里是【只读】的，创建 Release 必须显式放开写权限。
+# 少了这一段，最后一步会报 "Resource not accessible by integration"。
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: 编译并发布固件
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装工具链
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi cmake ninja-build
+          echo "--- 版本 ---"
+          arm-none-eabi-gcc --version | head -1
+          cmake --version | head -1
+          ninja --version
+
+      # -----------------------------------------------------------------------
+      # 守卫：模板仓库本身是骨架（没有链接脚本），跑不了固件构建。
+      # 用显式判断把它变成"跳过"，而不是让整个发版流程变红。
+      # -----------------------------------------------------------------------
+      - name: 判断是不是可发布的固件工程
+        id: probe
+        run: |
+          if compgen -G "*.ld" >/dev/null || compgen -G "Core/*.ld" >/dev/null \
+             || compgen -G "ld/*.ld" >/dev/null || compgen -G "LinkerScript/*.ld" >/dev/null; then
+            echo "buildable=true" >> "$GITHUB_OUTPUT"
+            echo "找到链接脚本，继续发版"
+          else
+            echo "buildable=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::没找到链接脚本 —— 这个仓库是模板骨架，跳过固件打包（不算失败）。"
+          fi
+
+      - name: 编译 Debug
+        if: steps.probe.outputs.buildable == 'true'
+        run: |
+          cmake --preset Debug
+          cmake --build --preset Debug
+
+      - name: 编译 Release
+        if: steps.probe.outputs.buildable == 'true'
+        run: |
+          cmake --preset Release
+          cmake --build --preset Release
+
+      # -----------------------------------------------------------------------
+      # 收集产物并重命名：<产物名>-<tag>-<debug|release>.<ext>
+      # 直接把 build/ 里的文件传上去的话，两个配置的 .bin 会重名互相覆盖。
+      # -----------------------------------------------------------------------
+      - name: 收集产物 + 生成校验和
+        if: steps.probe.outputs.buildable == 'true'
+        run: |
+          set -euo pipefail
+
+          VER="${GITHUB_REF_NAME}"
+          case "$VER" in
+            v*) ;;
+            *) VER="manual-$(date -u +%Y%m%d-%H%M%S)" ;;   # 手动触发时用时间戳
+          esac
+          echo "版本号: $VER"
+
+          mkdir -p dist
+          for preset in Debug Release; do
+            for ext in bin hex elf map; do
+              for f in build/"$preset"/*."$ext"; do
+                [ -e "$f" ] || continue
+                base="$(basename "$f" ".$ext")"
+                cp "$f" "dist/${base}-${VER}-$(echo "$preset" | tr '[:upper:]' '[:lower:]').${ext}"
+              done
+            done
+          done
+
+          # 应该拿到 2 配置 × 4 扩展名 = 8 个文件；少一个都说明构建有问题
+          n="$(find dist -type f | wc -l)"
+          if [ "$n" -lt 8 ]; then
+            echo "::error::产物数量不对：期望至少 8 个，实际 $n 个"
+            ls -l dist || true
+            exit 1
+          fi
+
+          ( cd dist && sha256sum ./* > SHA256SUMS.txt )
+
+          echo "--- dist ---"
+          ls -l dist
+
+      # 无论 tag 还是手动触发都留一份 artifact，方便手动下载
+      - name: 上传到 Actions artifacts
+        if: steps.probe.outputs.buildable == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.ref_name }}-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
+
+      # -----------------------------------------------------------------------
+      # 发布到 Releases 页面。
+      # 只用 runner 上自带的 gh CLI，不引第三方 action，少一层供应链风险。
+      # 手动触发（非 tag）时只留 artifact，不发 Release，可以当"预演"用。
+      # -----------------------------------------------------------------------
+      - name: 发布到 GitHub Release
+        if: steps.probe.outputs.buildable == 'true' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME}"
+
+          if gh release view "$VER" >/dev/null 2>&1; then
+            echo "Release $VER 已存在 —— 追加固件（同名文件覆盖）"
+            gh release upload "$VER" dist/* --clobber
+          else
+            echo "创建 Release $VER"
+            gh release create "$VER" dist/* \
+              --title "$VER" \
+              --generate-notes \
+              --verify-tag
+          fi
