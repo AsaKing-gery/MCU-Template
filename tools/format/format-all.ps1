@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Run clang-format over a whole project.
@@ -35,10 +35,10 @@
     Pass -ExcludeDirs @() to format absolutely everything.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot E:\myproj
-    powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot E:\myproj -Apply
-    powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot E:\myproj -ExcludeDirs Drivers,'sd_card\FATFS'
-    powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot E:\myproj -ExcludeDirs Drivers,'User\Src\Libraries' -ExcludeFiles 'arm_math.h'
+    powershell -ExecutionPolicy Bypass -File tools/format/format-all.ps1 -ProjectRoot E:\myproj
+    powershell -ExecutionPolicy Bypass -File tools/format/format-all.ps1 -ProjectRoot E:\myproj -Apply
+    powershell -ExecutionPolicy Bypass -File tools/format/format-all.ps1 -ProjectRoot E:\myproj -ExcludeDirs Drivers,'sd_card\FATFS'
+    powershell -ExecutionPolicy Bypass -File tools/format/format-all.ps1 -ProjectRoot E:\myproj -ExcludeDirs Drivers,'User\Src\Libraries' -ExcludeFiles 'arm_math.h'
 #>
 [CmdletBinding()]
 param(
@@ -65,7 +65,15 @@ $ErrorActionPreference = 'Stop'
 # directory also makes it work when launched as a VSCode task, where the
 # working directory is already the project root.
 if (-not $ProjectRoot) {
-    $ProjectRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { (Get-Location).Path }
+    # 从脚本所在目录逐级往上找，第一个含 mcu.json 的目录就是工程根。
+    # 这样脚本在 tools/ 子树里怎么挪都不会失效 —— 比数 ".." 的层数可靠得多。
+    $ProjectRoot = $PSScriptRoot
+    if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
+    while (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'mcu.json'))) {
+        $parent = Split-Path -Parent $ProjectRoot
+        if (-not $parent -or $parent -eq $ProjectRoot) { $ProjectRoot = (Get-Location).Path; break }
+        $ProjectRoot = $parent
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -146,8 +154,18 @@ if (Test-Path -LiteralPath $excludeFile) {
 # -----------------------------------------------------------------------------
 $styleFile = Join-Path $root '.clang-format'
 if (-not (Test-Path -LiteralPath $styleFile)) {
-    $tplStyle = Join-Path (Split-Path -Parent $PSScriptRoot) '.clang-format'
-    if (Test-Path -LiteralPath $tplStyle) {
+    # 兜底：逐级往上找模板自带的 .clang-format。
+    # 脚本在 tools/format/ 下，不能再靠一层 ".." 推算模板根。
+    $tplStyle = ''
+    $probe = $PSScriptRoot
+    while ($probe) {
+        $cand = Join-Path $probe '.clang-format'
+        if (Test-Path -LiteralPath $cand) { $tplStyle = $cand; break }
+        $parent = Split-Path -Parent $probe
+        if (-not $parent -or $parent -eq $probe) { break }
+        $probe = $parent
+    }
+    if ($tplStyle -and (Test-Path -LiteralPath $tplStyle)) {
         $styleFile = $tplStyle
         $styleNote = ' (fallback: the template copy)'
     } else {

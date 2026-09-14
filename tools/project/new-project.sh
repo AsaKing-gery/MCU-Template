@@ -2,20 +2,25 @@
 # 用模板创建新的 MCU 工程（Linux / macOS 版）
 #
 # 用法：
-#   bash scripts/new-project.sh <目标目录> [芯片]
+#   bash tools/project/new-project.sh <目标目录> [芯片]
 # 例：
-#   bash scripts/new-project.sh ../MyF407 stm32f407vg
-#   bash scripts/new-project.sh ../MyCubeProj            # 只用默认芯片，之后自己改 mcu.json
+#   bash tools/project/new-project.sh ../MyF407 stm32f407vg
+#   bash tools/project/new-project.sh ../MyCubeProj            # 只用默认芯片，之后自己改 mcu.json
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATE_ROOT="$(dirname "$SCRIPT_DIR")"
+# 逐级往上找 mcu.json，第一个找到的就是模板根。
+# 脚本在 tools/project/ 下，不能只用一层 ".." 推算。
+TEMPLATE_ROOT="$SCRIPT_DIR"
+while [[ ! -f "$TEMPLATE_ROOT/mcu.json" && "$TEMPLATE_ROOT" != "/" ]]; do
+    TEMPLATE_ROOT="$(dirname "$TEMPLATE_ROOT")"
+done
 
 TARGET="${1:-}"
 CHIP="${2:-}"
 
 if [[ -z "$TARGET" ]]; then
-    echo "用法: bash scripts/new-project.sh <目标目录> [芯片]" >&2
+    echo "用法: bash tools/project/new-project.sh <目标目录> [芯片]" >&2
     exit 1
 fi
 
@@ -52,7 +57,7 @@ fi
 mkdir -p "$TARGET"
 
 echo "[new-project] 复制模板文件到 $TARGET"
-for entry in .vscode cmake scripts App .svd .clangd .clang-format .gitignore CMakeLists.txt CMakePresets.json; do
+for entry in .vscode cmake tools App .svd .clangd .clang-format .gitignore CMakeLists.txt CMakePresets.json; do
     if [[ -e "$TEMPLATE_ROOT/$entry" ]]; then
         cp -R "$TEMPLATE_ROOT/$entry" "$TARGET/"
         echo "  + $entry"
@@ -83,7 +88,7 @@ EOF
     echo "  + mcu.json ($DEVICE)"
 fi
 
-bash "$TARGET/scripts/sync-mcu.sh" "$TARGET"
+bash "$TARGET/tools/project/sync-mcu.sh" "$TARGET"
 
 echo ""
 echo "[new-project] 完成：$TARGET"

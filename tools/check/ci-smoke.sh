@@ -28,18 +28,23 @@
 #      → 彩色固件体积报告
 #
 #  用法：
-#    bash scripts/ci-smoke.sh
+#    bash tools/check/ci-smoke.sh
 #        临时目录里跑，结束自动清理
 #
-#    KEEP=1 bash scripts/ci-smoke.sh
+#    KEEP=1 bash tools/check/ci-smoke.sh
 #        保留临时目录，方便事后排查
 #
-#    SMOKE_WORKDIR=/some/dir bash scripts/ci-smoke.sh
+#    SMOKE_WORKDIR=/some/dir bash tools/check/ci-smoke.sh
 #        用指定目录当工程目录（CI 里靠它把产物留下来做 artifact）
 # =============================================================================
 set -euo pipefail
 
-TPL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# 模板根：从脚本所在目录往上找 mcu.json
+# （脚本在 tools/check/ 下，不能只用一层 ".." 推算）
+TPL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+while [ ! -f "$TPL_ROOT/mcu.json" ] && [ "$TPL_ROOT" != "/" ]; do
+    TPL_ROOT="$(dirname "$TPL_ROOT")"
+done
 SMOKE_SRC="$TPL_ROOT/ci/smoke"
 
 if [ ! -d "$SMOKE_SRC" ]; then
@@ -48,9 +53,9 @@ if [ ! -d "$SMOKE_SRC" ]; then
 fi
 
 # 要复制进临时工程的条目。
-# 必须和 scripts/new-project.sh 的清单保持一致 —— 这样"新建工程会拿到什么"
+# 必须和 tools/project/new-project.sh 的清单保持一致 —— 这样"新建工程会拿到什么"
 # 这件事本身也被 CI 覆盖到了（之前就漏过 .clang-format）。
-ENTRIES=".clang-format .clangd .gitignore CMakeLists.txt CMakePresets.json cmake mcu.json scripts App .vscode .svd"
+ENTRIES=".clang-format .clangd .gitignore CMakeLists.txt CMakePresets.json cmake mcu.json tools App .vscode .svd"
 
 if [ -n "${SMOKE_WORKDIR:-}" ]; then
     WORK="$SMOKE_WORKDIR"

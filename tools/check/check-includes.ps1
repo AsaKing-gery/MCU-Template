@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Detect circular #include chains among the project's own headers.
@@ -49,8 +49,8 @@
     Stop after this many cycles (keeps the output readable). Default 50.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File scripts/check-includes.ps1
-    powershell -ExecutionPolicy Bypass -File scripts/check-includes.ps1 -ProjectRoot E:\myproj
+    powershell -ExecutionPolicy Bypass -File tools/check/check-includes.ps1
+    powershell -ExecutionPolicy Bypass -File tools/check/check-includes.ps1 -ProjectRoot E:\myproj
 #>
 [CmdletBinding()]
 param(
@@ -70,7 +70,15 @@ if ($NoExcludes) {
 }
 
 if (-not $ProjectRoot) {
-    $ProjectRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { (Get-Location).Path }
+    # 从脚本所在目录逐级往上找，第一个含 mcu.json 的目录就是工程根。
+    # 这样脚本在 tools/ 子树里怎么挪都不会失效 —— 比数 ".." 的层数可靠得多。
+    $ProjectRoot = $PSScriptRoot
+    if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
+    while (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'mcu.json'))) {
+        $parent = Split-Path -Parent $ProjectRoot
+        if (-not $parent -or $parent -eq $ProjectRoot) { $ProjectRoot = (Get-Location).Path; break }
+        $ProjectRoot = $parent
+    }
 }
 
 # Optional per-project exclude list, shared with format-all.ps1:
@@ -147,6 +155,14 @@ $graph = @{}
 $dupNames = @{}
 foreach ($f in $files) {
     $text = [System.IO.File]::ReadAllText($f.FullName)
+
+    # 先剥掉注释再扫描。
+    # 头文件里经常在注释里写用法示例，例如 App/Inc/app.h 的文档注释里有：
+    #     *     #include "app.h"
+    # 不剥注释的话这里会被当成真实依赖，报出一个根本不存在的"循环包含"。
+    # 用一次替换同时处理 /* */ 和 //，避免两种注释互相咬到。
+    $text = [regex]::Replace($text, '/\*.*?\*/|//[^\r\n]*', ' ', 'Singleline')
+
     $inc = New-Object System.Collections.ArrayList
     foreach ($m in [regex]::Matches($text, '#[ \t]*include[ \t]+"([^"]+)"')) {
         $name = $m.Groups[1].Value

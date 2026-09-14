@@ -3,7 +3,7 @@ build/
 cmake-build-*/
 compile_commands.json
 
-# 冒烟测试（scripts/ci-smoke.sh）在 CI 里生成的临时工程，
+# 冒烟测试（tools/check/ci-smoke.sh）在 CI 里生成的临时工程，
 # 用来把固件产物留下来做 artifact
 ci-out/
 

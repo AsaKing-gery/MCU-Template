@@ -45,7 +45,7 @@ set(_mcu_json "${_proj_root}/mcu.json")
 if(NOT EXISTS "${_mcu_json}")
   message(FATAL_ERROR
     "找不到单点配置文件：${_mcu_json}\n"
-    "请把模板中的 mcu.json 复制到工程根目录，或运行 scripts/new-project 生成工程。")
+    "请把模板中的 mcu.json 复制到工程根目录，或运行 tools/project/new-project 生成工程。")
 endif()
 
 file(READ "${_mcu_json}" _mcu_raw)

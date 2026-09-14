@@ -153,13 +153,13 @@
       // 整个工程跑一遍 clang-format。默认是"预览"，只报告会改哪些文件、多少行。
       // 确认后跑 "Format All (apply)" 真正写入（会先备份到 %USERPROFILE%\.mcu-template-backup\）。
       //
-      // 这里用相对路径 scripts/... 而不是 ${workspaceFolder}：任务的工作目录
+      // 这里用相对路径 tools/... 而不是 ${workspaceFolder}：任务的工作目录
       // 默认就是工程根，而工程路径一旦含括号（如 JY.RFM-0A-U575(24G)-cmake），
       // PowerShell 会把括号当子表达式，把命令拆坏。
       // format-all.ps1 不传 -ProjectRoot 时默认就取脚本的上一级目录，正好是工程根。
       "label": "Format All (preview)",
       "type": "shell",
-      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/format-all.ps1",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/format/format-all.ps1",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -169,7 +169,7 @@
     {
       "label": "Format All (apply)",
       "type": "shell",
-      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/format-all.ps1 -Apply",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/format/format-all.ps1 -Apply",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -208,10 +208,10 @@
       // 提交前跑一次，跑不过就别提交。云端 .github/workflows/ci.yml 做的是同一件事。
       //
       // 体积门禁默认关闭（只看数字不卡人）。想卡住的话改成：
-      //   ... scripts/ci.ps1 -MaxFlashPercent 90 -MaxRamPercent 90
+      //   ... tools/check/ci.ps1 -MaxFlashPercent 90 -MaxRamPercent 90
       "label": "CI (full check)",
       "type": "shell",
-      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ci.ps1",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; powershell -NoProfile -ExecutionPolicy Bypass -File tools/check/ci.ps1",
       "problemMatcher": [
         "$gcc"
       ],
@@ -229,7 +229,7 @@
       // 单独跑一遍包含关系检查（找循环包含），比完整 CI 快得多
       "label": "Check: circular includes",
       "type": "shell",
-      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-includes.ps1",
+      "command": "[Console]::OutputEncoding=[Text.Encoding]::UTF8; powershell -NoProfile -ExecutionPolicy Bypass -File tools/check/check-includes.ps1",
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
@@ -240,15 +240,15 @@
       // 相对路径，理由同上：工程路径含括号时 ${workspaceFolder} 会被 PowerShell 拆坏。
       "label": "MCU: Sync from mcu.json",
       "type": "shell",
-      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/sync-mcu.ps1",
+      "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File tools/project/sync-mcu.ps1",
       "windows": {
-        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-mcu.ps1"
+        "command": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/project/sync-mcu.ps1"
       },
       "linux": {
-        "command": "bash scripts/sync-mcu.sh"
+        "command": "bash tools/project/sync-mcu.sh"
       },
       "osx": {
-        "command": "bash scripts/sync-mcu.sh"
+        "command": "bash tools/project/sync-mcu.sh"
       },
       "problemMatcher": [],
       "presentation": {

@@ -4,7 +4,7 @@
 # 用法：
 #   clang-format -i <文件>              单个文件
 #   ctrl+shift+I (VSCode)               当前文件
-#   scripts/format-all.ps1              整个工程（带备份+预览）
+#   tools/format/format-all.ps1              整个工程（带备份+预览）
 #
 # 改完这个文件，VSCode 里执行 `clangd: Restart language server` 或重载窗口生效。
 # =============================================================================

@@ -2,11 +2,19 @@
 # 把 mcu.json 里的芯片参数同步到 .vscode/launch.json（Linux / macOS 版）
 #
 # 采用正则原地替换，保留 launch.json 原有的排版与注释。
-# 用法：bash scripts/sync-mcu.sh [工程根目录]
+# 用法：bash tools/project/sync-mcu.sh [工程根目录]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${1:-$(dirname "$SCRIPT_DIR")}"
+# 默认工程根：从脚本所在目录往上找 mcu.json
+# （脚本在 tools/project/ 下，不能只用一层 ".." 推算）
+PROJECT_ROOT="${1:-}"
+if [[ -z "$PROJECT_ROOT" ]]; then
+    PROJECT_ROOT="$SCRIPT_DIR"
+    while [[ ! -f "$PROJECT_ROOT/mcu.json" && "$PROJECT_ROOT" != "/" ]]; do
+        PROJECT_ROOT="$(dirname "$PROJECT_ROOT")"
+    done
+fi
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "需要 python3 才能解析 mcu.json，请先安装。" >&2

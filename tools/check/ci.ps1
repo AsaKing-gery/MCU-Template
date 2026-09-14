@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Local CI pipeline for this MCU project.
@@ -48,8 +48,8 @@
     Slower, but that is what a CI machine does.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File scripts/ci.ps1
-    powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -Fresh -MaxFlashPercent 90
+    powershell -ExecutionPolicy Bypass -File tools/check/ci.ps1
+    powershell -ExecutionPolicy Bypass -File tools/check/ci.ps1 -Fresh -MaxFlashPercent 90
 #>
 [CmdletBinding()]
 param(
@@ -67,7 +67,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
 
 if (-not $ProjectRoot) {
-    $ProjectRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { (Get-Location).Path }
+    # 从脚本所在目录逐级往上找，第一个含 mcu.json 的目录就是工程根。
+    # 这样脚本在 tools/ 子树里怎么挪都不会失效 —— 比数 ".." 的层数可靠得多。
+    $ProjectRoot = $PSScriptRoot
+    if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
+    while (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'mcu.json'))) {
+        $parent = Split-Path -Parent $ProjectRoot
+        if (-not $parent -or $parent -eq $ProjectRoot) { $ProjectRoot = (Get-Location).Path; break }
+        $ProjectRoot = $parent
+    }
 }
 $root = (Resolve-Path -LiteralPath $ProjectRoot).Path
 
@@ -132,7 +140,8 @@ if (-not $SkipIncludes) {
 # -----------------------------------------------------------------------------
 if (-not $SkipFormat) {
     Write-Head '2/4  clang-format'
-    $fmt = Join-Path $PSScriptRoot 'format-all.ps1'
+    # format-all 挪到了同级的 format/ 目录，所以这里要跨一层
+    $fmt = Join-Path $PSScriptRoot '../format/format-all.ps1'
     if (-not (Test-Path -LiteralPath $fmt)) {
         Write-Host "$cW    format-all.ps1 not found - skipped$cX"
         Add-Result 'clang-format' 'SKIP' 'script missing'

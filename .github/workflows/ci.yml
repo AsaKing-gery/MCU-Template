@@ -17,12 +17,12 @@
 #         * 新建工程会复制的文件是否都在（之前就漏过 .clang-format）
 #         * mcu.json 的关键字段是否齐全（缺了工具链文件会直接 FATAL_ERROR）
 #
-#    B. 端到端冒烟 —— scripts/ci-smoke.sh
+#    B. 端到端冒烟 —— tools/check/ci-smoke.sh
 #         复制模板骨架 + 叠加 ci/smoke 里的最小裸机固件，真的编出
 #         Debug/Release 固件，并断言 .elf/.hex/.bin/.map 都产出了。
 #         它验证的是模板的核心承诺：**复制出去就能编**。
 #
-#  注意：这里**不检查代码格式**。格式化属于本地流程（scripts/ci.ps1），
+#  注意：这里**不检查代码格式**。格式化属于本地流程（tools/check/ci.ps1），
 #  而且对 GBK 文件和厂商代码需要额外处理，不适合放在云端。
 # =============================================================================
 name: CI
@@ -77,14 +77,15 @@ jobs:
           "
 
           echo "===== 2/4 shell 脚本语法 ====="
-          for f in scripts/*.sh; do
+          shopt -s globstar nullglob
+          for f in tools/**/*.sh; do
             bash -n "$f"
             echo "  OK    $f"
           done
 
           if command -v pwsh >/dev/null 2>&1; then
             echo "===== PowerShell 脚本可解析 ====="
-            for f in scripts/*.ps1; do
+            for f in tools/**/*.ps1; do
               pwsh -NoProfile -NonInteractive -Command \
                 "[void][ScriptBlock]::Create((Get-Content -Raw -LiteralPath '$f'))"
               echo "  OK    $f"
@@ -98,11 +99,11 @@ jobs:
           for f in \
               .clang-format .clangd .gitignore CMakeLists.txt CMakePresets.json mcu.json \
               cmake/gcc-arm-none-eabi.cmake cmake/report_size.cmake cmake/disasm.cmake \
-              scripts/new-project.ps1 scripts/new-project.sh \
-              scripts/sync-mcu.ps1 scripts/sync-mcu.sh \
-              scripts/setup-env.ps1 scripts/fix-encoding.ps1 \
-              scripts/format-all.ps1 scripts/build.ps1 \
-              scripts/ci.ps1 scripts/check-includes.ps1 scripts/ci-smoke.sh \
+              tools/project/new-project.ps1 tools/project/new-project.sh \
+              tools/project/sync-mcu.ps1 tools/project/sync-mcu.sh \
+              tools/env/setup-env.ps1 tools/format/fix-encoding.ps1 \
+              tools/format/format-all.ps1 tools/build/build.ps1 \
+              tools/check/ci.ps1 tools/check/check-includes.ps1 tools/check/ci-smoke.sh \
               .vscode/settings.json .vscode/launch.json \
               .vscode/tasks.json .vscode/extensions.json \
               ci/smoke/Core/Src/main.c ci/smoke/Core/Src/syscalls.c \
@@ -136,7 +137,7 @@ jobs:
       #  B. 端到端冒烟
       # -----------------------------------------------------------------------
       - name: 冒烟构建（复制模板骨架 + 最小固件 → Debug/Release）
-        run: bash scripts/ci-smoke.sh
+        run: bash tools/check/ci-smoke.sh
 
       - name: 上传固件产物
         uses: actions/upload-artifact@v4

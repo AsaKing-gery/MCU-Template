@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     Find (and optionally convert) source files that are not valid UTF-8.
@@ -36,8 +36,8 @@
     script only reports; nothing is modified.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File scripts/fix-encoding.ps1
-    powershell -ExecutionPolicy Bypass -File scripts/fix-encoding.ps1 -Apply
+    powershell -ExecutionPolicy Bypass -File tools/format/fix-encoding.ps1
+    powershell -ExecutionPolicy Bypass -File tools/format/fix-encoding.ps1 -Apply
 #>
 [CmdletBinding()]
 param(
@@ -55,7 +55,15 @@ $ErrorActionPreference = 'Stop'
 # directory also makes it work when launched as a VSCode task, where the
 # working directory is already the project root.
 if (-not $ProjectRoot) {
-    $ProjectRoot = if ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot } else { (Get-Location).Path }
+    # 从脚本所在目录逐级往上找，第一个含 mcu.json 的目录就是工程根。
+    # 这样脚本在 tools/ 子树里怎么挪都不会失效 —— 比数 ".." 的层数可靠得多。
+    $ProjectRoot = $PSScriptRoot
+    if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
+    while (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot 'mcu.json'))) {
+        $parent = Split-Path -Parent $ProjectRoot
+        if (-not $parent -or $parent -eq $ProjectRoot) { $ProjectRoot = (Get-Location).Path; break }
+        $ProjectRoot = $parent
+    }
 }
 
 # -----------------------------------------------------------------------------

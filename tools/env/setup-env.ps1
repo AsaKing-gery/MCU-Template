@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     One-time Windows environment setup for this template.
@@ -29,8 +29,8 @@
     Show what would change without writing anything.
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File scripts/setup-env.ps1 -DryRun
-    powershell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
+    powershell -ExecutionPolicy Bypass -File tools/env/setup-env.ps1 -DryRun
+    powershell -ExecutionPolicy Bypass -File tools/env/setup-env.ps1
 #>
 [CmdletBinding()]
 param(

@@ -35,26 +35,41 @@ MCU-Template/
 ├── .clangd                     clangd 配置（指向 build/Debug）
 ├── .clang-format               ★ 代码格式化规则（Tab + Allman，按国内单片机习惯调过）
 ├── .gitignore
-├── cmake/
+├── cmake/                      构建系统（CMake 侧的全部逻辑）
 │   ├── gcc-arm-none-eabi.cmake 工具链文件，自动解析 mcu.json
+│   ├── report_size.cmake        彩色固件体积报告（构建后自动跑）
 │   └── disasm.cmake             反汇编辅助脚本（供给 disasm 目标调用）
-├── scripts/
-│   ├── build.ps1               ★ 一键构建：修 UTF-8 中文乱码 + 打印彩色摘要（Ctrl+Shift+B 用它）
-│   ├── setup-env.ps1           ★ 一次性配置 Windows 用户环境变量（PATH / OPENOCD_SCRIPTS）
-│   ├── fix-encoding.ps1        ★ 找出（并可转换）GBK 编码的源文件——clangd 只认 UTF-8
-│   ├── format-all.ps1          ★ 整个工程跑 clang-format（默认预览、可备份应用）
-│   ├── new-project.ps1         ★ 一键建工程 / 把模板应用到已有工程（Windows）
-│   ├── new-project.sh          同上（Linux / macOS）
-│   ├── sync-mcu.ps1            mcu.json → launch.json 同步
-│   └── sync-mcu.sh             同上（Linux / macOS）
+│
+├── tools/                      ★ 工具脚本（按用途分组，不含任何业务代码）
+│   ├── README.md                工具索引，不知道跑哪个就看它
+│   ├── project/                 建工程 / 同步配置
+│   │   ├── new-project.ps1        ★ 一键建工程（Windows）
+│   │   ├── new-project.sh         同上（Linux / macOS）
+│   │   ├── sync-mcu.ps1           mcu.json → launch.json
+│   │   └── sync-mcu.sh            同上（Linux / macOS）
+│   ├── env/                     环境准备（跑一次即可）
+│   │   └── setup-env.ps1          ★ 写用户 PATH / OPENOCD_SCRIPTS
+│   ├── build/                   构建
+│   │   └── build.ps1              一键构建：修中文乱码 + 彩色摘要
+│   ├── format/                  代码格式化
+│   │   ├── format-all.ps1         ★ 全工程 clang-format（默认预览、可备份）
+│   │   └── fix-encoding.ps1       ★ 找出（并可转换）GBK 源文件
+│   └── check/                   检查 / CI
+│       ├── ci.ps1                  ★ 本地 CI 流水线（提交前跑）
+│       ├── check-includes.ps1      单独查循环包含
+│       └── ci-smoke.sh             模板端到端冒烟（云端 CI 用）
+│
+├── App/                        你自己的代码放这里（CubeMX 不会覆盖）
+│   ├── Inc/app.h
+│   └── Src/app.c
+│
+├── ci/smoke/                   CI 冒烟固件（零 HAL 依赖，只为验证模板管道）
 ├── .vscode/
 │   ├── settings.json           CMake Presets + clangd + clang-format
 │   ├── launch.json             Cortex-Debug：OpenOCD / J-Link / Attach
 │   ├── tasks.json              Configure / Build / Rebuild / Flash / Sync / Format
 │   └── extensions.json         推荐扩展
-├── App/                        你自己的代码放这里（CubeMX 不会覆盖）
-│   ├── Inc/app.h
-│   └── Src/app.c
+├── .github/workflows/ci.yml    云端 CI（模板自检 + 冒烟构建）
 └── .svd/                       放芯片 SVD 文件（用于查看外设寄存器）
 ```
 
@@ -80,10 +95,10 @@ MCU-Template/
 
 ```powershell
 # 先看会改什么，不实际写入
-powershell -ExecutionPolicy Bypass -File scripts/setup-env.ps1 -DryRun
+powershell -ExecutionPolicy Bypass -File tools/env/setup-env.ps1 -DryRun
 
 # 确认后执行
-powershell -ExecutionPolicy Bypass -File scripts/setup-env.ps1
+powershell -ExecutionPolicy Bypass -File tools/env/setup-env.ps1
 ```
 
 输出示例：
@@ -193,13 +208,13 @@ OpenOCD 认这个环境变量，把它加进脚本搜索路径。设好之后：
 
 ```powershell
 # 在 MCU-Template 目录下
-powershell -ExecutionPolicy Bypass -File scripts/new-project.ps1 ..\MyF407 -Chip stm32f407vg
+powershell -ExecutionPolicy Bypass -File tools/project/new-project.ps1 ..\MyF407 -Chip stm32f407vg
 ```
 
 Linux / macOS：
 
 ```bash
-bash scripts/new-project.sh ../MyF407 stm32f407vg
+bash tools/project/new-project.sh ../MyF407 stm32f407vg
 ```
 
 脚本会：建目录 → 复制模板文件 → 按芯片写好 `mcu.json` → 同步 `launch.json`。
@@ -207,7 +222,7 @@ bash scripts/new-project.sh ../MyF407 stm32f407vg
 ### 方式 B：套用到已有的 CubeMX 工程
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/new-project.ps1 ..\MyCubeProj -Chip stm32g431rb
+powershell -ExecutionPolicy Bypass -File tools/project/new-project.ps1 ..\MyCubeProj -Chip stm32g431rb
 ```
 
 **已存在的 `mcu.json` 不会被覆盖**（除非加 `-Force`），所以可以放心反复执行来更新模板文件。
@@ -217,7 +232,7 @@ powershell -ExecutionPolicy Bypass -File scripts/new-project.ps1 ..\MyCubeProj -
 把本仓库设为 Template Repository，新项目点 "Use this template"，然后：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/new-project.ps1 . -Chip stm32f401re -Force
+powershell -ExecutionPolicy Bypass -File tools/project/new-project.ps1 . -Chip stm32f401re -Force
 ```
 
 ### 之后的标准流程
@@ -257,7 +272,7 @@ VSCode 里 `Ctrl+Shift+P` → `Tasks: Run Task`，或直接 `Ctrl+Shift+B`。
 > 24G : 无法将"24G"项识别为 cmdlet、函数、脚本文件或可运行程序的名称
 > ```
 >
-> 任务的工作目录默认就是工程根，所以这里全部用**相对路径**（`scripts/xxx.ps1`、`build`）。
+> 任务的工作目录默认就是工程根，所以这里全部用**相对路径**（`tools/xxx/xxx.ps1`、`build`）。
 > **你自己加任务时也请照做。**
 
 ### 构建 / 重新构建 / 烧录 —— 别混
@@ -313,7 +328,7 @@ CMake Tools 扩展把配置/构建输出写到 VSCode 的 **Output 面板**，�
 | 终端里敲 `chcp 65001` | ❌ 还是乱码 |
 | 在 `settings.json` 里自定义一个"先 chcp"的终端 profile | ❌ 反而把终端搞坏了（见下面的教训） |
 | 终端里敲 `[Console]::OutputEncoding=[Text.Encoding]::UTF8` | ✅ **正常** |
-| `scripts/build.ps1`（内部设了上面这行） | ✅ 正常 |
+| `tools/build/build.ps1`（内部设了上面这行） | ✅ 正常 |
 
 **原因**：`chcp` 改的是控制台代码页，而 PowerShell 启动时就已经把
 `[Console]::OutputEncoding` 初始化好了，**`chcp` 不会刷新这个 .NET 属性**。
@@ -353,16 +368,16 @@ configure 的（终端任务还是 CMake Tools），在终端里构建都有颜�
 > CMake Tools 那条路径永远是**干净纯文本**、不会出乱码 —— 因为 `MCU_COLOR_OUTPUT`
 > 用 `set()` 而**不是 `option()`**，**故意不写进 `CMakeCache.txt`**。
 
-#### 备用：`scripts/build.ps1`
+#### 备用：`tools/build/build.ps1`
 
 如果哪天终端里也没颜色了，还有个更彻底的办法 —— 这个脚本自己打印彩色摘要
 （**不经过 ninja，颜色一定生效**），并且强制 UTF-8：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/build.ps1                 # Debug
-powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Preset Release
-powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Rebuild        # = Keil Rebuild
-powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Flash          # 编译 + 烧录
+powershell -ExecutionPolicy Bypass -File tools/build/build.ps1                 # Debug
+powershell -ExecutionPolicy Bypass -File tools/build/build.ps1 -Preset Release
+powershell -ExecutionPolicy Bypass -File tools/build/build.ps1 -Rebuild        # = Keil Rebuild
+powershell -ExecutionPolicy Bypass -File tools/build/build.ps1 -Flash          # 编译 + 烧录
 ```
 
 > 它**故意没有**接进 `tasks.json`：用 `-File <路径>` 调用时，工程路径里的括号
@@ -413,9 +428,9 @@ powershell -ExecutionPolicy Bypass -File scripts/build.ps1 -Flash          # 编
 ```powershell
 # ① 单个文件：VSCode 里 Shift+Alt+F
 # ② 整个工程（先预览）
-powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot <工程目录>
+powershell -ExecutionPolicy Bypass -File tools/format/format-all.ps1 -ProjectRoot <工程目录>
 # ③ 确认后执行（自动备份）
-powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot <工程目录> -Apply
+powershell -ExecutionPolicy Bypass -File tools/format/format-all.ps1 -ProjectRoot <工程目录> -Apply
 ```
 
 ### ⚠️ 两个必须避开的坑
@@ -462,7 +477,7 @@ CubeMX 工程里的第三方代码往往比你自己的代码多得多，而且�
 用法：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/format-all.ps1 -ProjectRoot <工程目录> `
+powershell -ExecutionPolicy Bypass -File tools/format/format-all.ps1 -ProjectRoot <工程目录> `
     -ExcludeDirs Drivers,'User\Src\Libraries','sd_card\FATFS' `
     -ExcludeFiles 'arm_math.h'
 ```
@@ -522,7 +537,7 @@ CMake 的 target 名只允许 `字母 / 数字 / _ / - / . / +`，而真实工�
 | `MyF407` | `MyF407.elf` |
 | `JY.RFM-0A-U575(24G)-cmake` | `JY.RFM-0A-U575_24G_-cmake.elf` |
 
-`launch.json` 里的 `executable` 由 `scripts/sync-mcu` 按**同一套规则**写入，
+`launch.json` 里的 `executable` 由 `tools/project/sync-mcu` 按**同一套规则**写入，
 两边永远一致，不用手动改。所以**项目路径里有空格也没问题**。
 
 ---
@@ -673,7 +688,7 @@ E[...] [pp_file_not_found] Line 20: in included file: 'math.h' file not found
 说明 clangd **不认识交叉编译器的内建头文件**（`stdio.h` / `math.h` / `stdint.h` 来自 GCC 自带的 newlib）。
 `--query-driver` 是**按程序名去 PATH 里找** `arm-none-eabi-gcc` 的，PATH 里没有就拿不到。
 
-→ 跑 `scripts/setup-env.ps1`（它会把工具链 bin 也加进 PATH），然后**重启 VSCode**。
+→ 跑 `tools/env/setup-env.ps1`（它会把工具链 bin 也加进 PATH），然后**重启 VSCode**。
 
 > 注意：CMake **不需要**工具链在 PATH 里（工具链文件自己会找），所以"能编译"和"clangd 报错"会同时出现。
 
@@ -690,13 +705,13 @@ E[...] File has invalid UTF-8 near offset 3: 092F2FB2E2CAD40D
 Keil / CubeIDE 在中文 Windows 上很容易把文件存成 GBK。查一下有多少：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/fix-encoding.ps1 -ProjectRoot <工程目录>
+powershell -ExecutionPolicy Bypass -File tools/format/fix-encoding.ps1 -ProjectRoot <工程目录>
 ```
 
 确认后转换（会先备份到 `%USERPROFILE%\.mcu-template-backup\`）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/fix-encoding.ps1 -ProjectRoot <工程目录> -Apply
+powershell -ExecutionPolicy Bypass -File tools/format/fix-encoding.ps1 -ProjectRoot <工程目录> -Apply
 ```
 
 > ⚠️ 脚本会单独列出**中文出现在字符串字面量里**的文件（比如 `printf("看门狗未开启")`）。
@@ -751,7 +766,7 @@ cmake --preset Debug --fresh      # 需要 CMake >= 3.24
 
 **Q：CubeMX 重新生成后 `CMakeLists.txt` 被覆盖了**
 CubeMX 选 `CMake` toolchain 时确实会覆盖。重新执行一次
-`scripts/new-project.ps1 <你的工程目录>`（不会动 `mcu.json`）。
+`tools/project/new-project.ps1 <你的工程目录>`（不会动 `mcu.json`）。
 想彻底避免，就把 CubeMX 的 Toolchain 改成 `Makefile`。
 
 **Q：链接报 `undefined reference to _exit / _sbrk / _write`**
@@ -762,7 +777,7 @@ CubeMX 选 `CMake` toolchain 时确实会覆盖。重新执行一次
 把文件放对位置，或修改 `mcu.json` 的 `linkerScript`。
 
 **Q：找不到 `ninja` / `cmake` / `openocd`**
-先跑一次 `scripts/setup-env.ps1`，它会自动找到并加进用户 `PATH`。
+先跑一次 `tools/env/setup-env.ps1`，它会自动找到并加进用户 `PATH`。
 
 装 VS 的用户注意：VS 自带 cmake 和 ninja，但**不在 `PATH` 里**。
 CMake Tools 扩展自己会找到它们，所以侧边栏能构建；但 `tasks.json` 里的任务是在普通终端跑的，会报找不到。
@@ -792,7 +807,7 @@ CMake 侧改了 `-mcpu` / `-mfpu` 后要重新 configure（`Rebuild (clean-first
 
 **Q：F5 调试报 `Can't find interface/stlink.cfg`**
 CubeIDE 自带 OpenOCD 的脚本在**另一个插件**里，需要告诉它。最省事的是设一次环境变量
-（`scripts/setup-env.ps1` 会自动配好）：
+（`tools/env/setup-env.ps1` 会自动配好）：
 
 ```powershell
 [Environment]::SetEnvironmentVariable('OPENOCD_SCRIPTS', '<st_scripts 目录>', 'User')
@@ -801,7 +816,7 @@ CubeIDE 自带 OpenOCD 的脚本在**另一个插件**里，需要告诉它。�
 详见「OpenOCD 从哪来」一节。
 
 **Q：F5 报 `openocd` 找不到**
-CubeIDE 自带的不在 `PATH` 里。跑 `scripts/setup-env.ps1`，或手动把它的 `bin` 加进用户 `PATH`。
+CubeIDE 自带的不在 `PATH` 里。跑 `tools/env/setup-env.ps1`，或手动把它的 `bin` 加进用户 `PATH`。
 
 **Q：`flash` 任务报 `embedded:startup.tcl:1520: Error: Infinite eval recursion`**
 这是 ST 版 OpenOCD 的报错 bug：它真正想说的是"没连上 ST-Link"（`exit` 在 `init` 之前非法，
@@ -834,7 +849,7 @@ CubeIDE 自带的不在 `PATH` 里。跑 `scripts/setup-env.ps1`，或手动把�
 改了模板本身之后，已有工程这样同步（**不会覆盖你的 `mcu.json`**）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/new-project.ps1 <已有工程目录>
+powershell -ExecutionPolicy Bypass -File tools/project/new-project.ps1 <已有工程目录>
 ```
 
 建议约定：
@@ -859,10 +874,10 @@ powershell -ExecutionPolicy Bypass -File scripts/new-project.ps1 <已有工程�
 
 一句话：**CI 保证"能编、体积不炸、代码健康"，硬件相关留在你本地 F5。**
 
-### 本地：`scripts/ci.ps1`（提交前跑这个）
+### 本地：`tools/check/ci.ps1`（提交前跑这个）
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/ci.ps1
+powershell -ExecutionPolicy Bypass -File tools/check/ci.ps1
 ```
 
 它会依次做四件事，任何一件不过就返回非 0：
@@ -878,14 +893,14 @@ powershell -ExecutionPolicy Bypass -File scripts/ci.ps1
 
 ```powershell
 # 体积门禁：超过就失败（默认 0 = 只看数字不卡人）
-powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -MaxFlashPercent 90 -MaxRamPercent 90
+powershell -ExecutionPolicy Bypass -File tools/check/ci.ps1 -MaxFlashPercent 90 -MaxRamPercent 90
 
 # 从零开始构建（模拟 CI 机器）
-powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -Fresh
+powershell -ExecutionPolicy Bypass -File tools/check/ci.ps1 -Fresh
 
 # 只跑一部分
-powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -SkipFormat
-powershell -ExecutionPolicy Bypass -File scripts/ci.ps1 -SkipIncludes -Presets Debug
+powershell -ExecutionPolicy Bypass -File tools/check/ci.ps1 -SkipFormat
+powershell -ExecutionPolicy Bypass -File tools/check/ci.ps1 -SkipIncludes -Presets Debug
 ```
 
 VSCode 里也能跑：`Ctrl+Shift+P` → `Tasks: Run Task` → **`CI (full check)`**。
@@ -894,9 +909,9 @@ VSCode 里也能跑：`Ctrl+Shift+P` → `Tasks: Run Task` → **`CI (full check
 
 | 脚本 | 作用 |
 |---|---|
-| `scripts/ci.ps1` | 完整流水线（上面那四步） |
-| `scripts/check-includes.ps1` | 单独查循环包含，会打印出**每一个环的完整路径** |
-| `scripts/format-all.ps1 -Strict` | 单独做格式检查（有不一致就返回非 0） |
+| `tools/check/ci.ps1` | 完整流水线（上面那四步） |
+| `tools/check/check-includes.ps1` | 单独查循环包含，会打印出**每一个环的完整路径** |
+| `tools/format/format-all.ps1 -Strict` | 单独做格式检查（有不一致就返回非 0） |
 
 ### `.format-exclude`：哪些代码不检查
 
@@ -933,10 +948,10 @@ arm_math.h              不带斜杠 = 按文件名匹配（支持通配符）
 
 ### 用起来的最低成本方案
 
-还没有 git 仓库的话，**先只用 `scripts/ci.ps1`**：
+还没有 git 仓库的话，**先只用 `tools/check/ci.ps1`**：
 
 ```
-改完代码 → 跑一次 scripts/ci.ps1 → 绿了再提交
+改完代码 → 跑一次 tools/check/ci.ps1 → 绿了再提交
 ```
 
 等你把工程推到 GitHub，把 `.github/workflows/ci.yml` 一起推上去就自动生效 ——

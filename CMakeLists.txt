@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.22)
 # 直接拿来当 target 名会 configure 失败，所以把非法字符统一换成下划线。
 #
 # 产物名会跟着变成消毒后的名字（括号→下划线）。.vscode/launch.json 里的
-# executable 由 scripts/sync-mcu 写入同一个名字，两边永远一致。
+# executable 由 tools/project/sync-mcu 写入同一个名字，两边永远一致。
 # -----------------------------------------------------------------------------
 get_filename_component(_dir_name "${CMAKE_CURRENT_SOURCE_DIR}" NAME)
 string(REGEX REPLACE "[^A-Za-z0-9_.+-]" "_" _proj_name "${_dir_name}")

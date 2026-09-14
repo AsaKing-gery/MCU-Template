@@ -19,7 +19,7 @@ foreach(_v SIZE ELF)
   endif()
 endforeach()
 
-# scripts/build.ps1 会在跑构建前设上这个环境变量，让 POST_BUILD 那次报告闭嘴 ——
+# tools/build/build.ps1 会在跑构建前设上这个环境变量，让 POST_BUILD 那次报告闭嘴 ——
 # 否则同一份体积会显示两次：ninja 里那次是白字（ANSI 被 ninja 剥掉），
 # 脚本末尾那次才是彩色的。脚本打印自己那份之前会把它清掉。
 if(DEFINED ENV{MCU_SIZE_QUIET})

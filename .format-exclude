@@ -10,7 +10,7 @@
 #   * 厂商代码通常是空格缩进，强制转 Tab 会让每一行都算改动
 #     （实测某个工程：不排除是 +114461 行，排除后降到 +18282 行）
 #
-# 这个文件是 scripts/format-all.ps1 和 scripts/check-includes.ps1 共用的。
+# 这个文件是 tools/format/format-all.ps1 和 tools/check/check-includes.ps1 共用的。
 # 判断标准：这段代码不是你写的、而且以后还会被上游覆盖 -> 写进来。
 
 # ── 通用（STM32 CubeMX 工程的常见位置）──
