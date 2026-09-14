@@ -1,5 +1,7 @@
 # MCU-Template
 
+[![CI](https://github.com/AsaKing-gery/MCU-Template/actions/workflows/ci.yml/badge.svg)](https://github.com/AsaKing-gery/MCU-Template/actions/workflows/ci.yml)
+
 一个"配一次、以后每个新项目复制即用"的 **VSCode + CMake + clangd + Cortex-Debug** Cortex-M 开发模板。
 
 目标是解决裸 CMake 方案最大的痛点：**每开一个新工程都要重配 `settings.json` / `launch.json` / `tasks.json`**。
