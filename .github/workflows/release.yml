@@ -1,22 +1,34 @@
 # =============================================================================
-#  GitHub Actions：打 tag 自动发版（编译 → 人工审批 → 发布）
+#  GitHub Actions：打 tag 自动发版（编译 → 人工审核 → 发布）
 #
 #  触发：push 形如 v1.0.1 的 tag（也可在 Actions 页面手动 Run workflow）
 #
 #  ⚠️ 打 tag 之前，必须先把本文件提交并推送上去。
 #     workflow 用的是「被 tag 的那个提交」里的版本 —— 文件还没推，tag 就等于白发。
 #
-#  两个 job：
-#     1. build    —— tag 一推就立刻编译打包，不等任何人
-#     2. publish  —— 挂在 release environment 上，**需要人工点 Approve 才会跑**
+#  ── 流程 ──────────────────────────────────────────────────────────────────
+#     push tag v1.0.1
+#        │
+#        ├─ [job build]   立刻编译打包（不等人），上传 artifact
+#        │
+#        └─ [job publish] 自动创建【草稿】Release，把 8 个固件挂上去
+#                          ↓
+#                     ⬇️ 这里就是"等待审批"
+#                     去 Releases 页面下载检查，确认无误后点 "Publish release"
 #
-#  ⚠️ 「等待审批」这个闸门是由【仓库设置】决定的：
-#       Settings → Environments → 新建一个名叫 release 的环境
-#                              → 勾上 Required reviewers → 选上你自己
-#     没有配 reviewers 的话，publish 会直接跑，等于没有审批。
-#     （详见文件末尾的说明）
+#  ── 为什么用"草稿 Release"当审批，而不是 environment ───────────────────────
+#    GitHub 原生的审批（environment + Required reviewers）有 plan 限制：
+#      "If you are on a GitHub Free, GitHub Pro, or GitHub Team plan,
+#       required reviewers are only available for public repositories."
+#    也就是说 **私有仓库要配 Required reviewers 得是 Enterprise**。
+#    所以这里换成"草稿"机制 —— 任何 plan 都能用，而且审核看到的
+#    就是最终要发布的那几个文件，比在 Actions 页面点 Approve 更直接。
 #
-#  产出（挂在 Releases 页面的 Assets 里）：
+#    如果你的账号是 Enterprise（或者仓库是公开的），可以打开下面的
+#    environment 段拿到 Actions 原生审批闸门，同时把 --draft 去掉。
+#    具体改法见文件末尾。
+#
+#  ── 产出 ──────────────────────────────────────────────────────────────────
 #     <产物名>-v1.0.1-debug.bin / .hex / .elf / .map
 #     <产物名>-v1.0.1-release.bin / .hex / .elf / .map
 #     SHA256SUMS.txt                       ← 烧录前核对用
@@ -140,23 +152,29 @@ jobs:
           retention-days: 90
 
   # ===========================================================================
-  # 2) 发布 —— 需要人工审批
-  #
-  # 这个 job 挂了 environment: release。只要那个 environment 配了
-  # Required reviewers，它就会停在 "Waiting for approval"，
-  # 直到有人点 Approve 才拿到 runner 开始跑。
-  # 审批期间你收到的是 GitHub 的通知邮件，直接在邮件里就能批。
+  # 2) 发布 —— 生成【草稿】Release，等你人工审核后点 Publish
   # ===========================================================================
   publish:
-    name: 发布 Release（需人工审批）
+    name: 生成待审的 Release 草稿
     needs: build
-    # 只在 tag 推送、且确实是可构建的固件工程时才进入审批
+    # 只在 tag 推送、且确实是可构建的固件工程时才走这一步
     if: startsWith(github.ref, 'refs/tags/') && needs.build.outputs.buildable == 'true'
     runs-on: ubuntu-latest
 
-    environment:
-      name: release
-      url: ${{ steps.publish.outputs.url }}
+    # 【可选】GitHub 原生审批闸门。
+    # 默认注释掉：私有仓库 + Free/Pro/Team 用不了 Required reviewers，
+    # 写了反而可能让这一步跑不起来。靠下面的 --draft 把关已经够了。
+    #
+    # 如果你的账号是 Enterprise（或仓库是公开的），想再加一道"必须在 Actions
+    # 页面点 Approve 才继续"的硬闸门：
+    #   1. Settings → Environments → New environment → 名字填 release
+    #      → 勾 Required reviewers → 加上你自己 → Save protection rules
+    #   2. 把下面 3 行取消注释
+    #   3. 同时把后面 gh release create 的 --draft 去掉（否则要点两次）
+    #
+    # environment:
+    #   name: release
+    #   url: ${{ steps.publish.outputs.url }}
 
     # 只有这一步需要写仓库内容的权限（创建 Release）
     permissions:
@@ -169,14 +187,14 @@ jobs:
           name: firmware-${{ github.run_number }}
           path: dist
 
-      - name: 预览将要发布的文件（审批通过后第一件事就会看到）
+      - name: 预览将要发布的文件
         run: |
           set -euo pipefail
           echo "版本: ${GITHUB_REF_NAME}"
-          echo "--- 即将发布到 Release 的附件 ---"
+          echo "--- 即将挂到 Release 上的附件 ---"
           ls -l dist
 
-      - name: 创建 / 更新 Release
+      - name: 创建 / 更新 Release 草稿
         id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -188,8 +206,9 @@ jobs:
             echo "Release $VER 已存在 —— 更新附件（同名文件覆盖）"
             gh release upload "$VER" dist/* --clobber
           else
-            echo "创建 Release $VER"
+            echo "创建 Release $VER（草稿）"
             gh release create "$VER" dist/* \
+              --draft \
               --title "$VER" \
               --generate-notes \
               --verify-tag
@@ -197,17 +216,37 @@ jobs:
 
           url="$(gh release view "$VER" --json url -q .url)"
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          echo "已发布: $url"
+
+          # 日志里也要讲清楚：多数人只看日志，不看 Summary 标签页
+          echo ""
+          echo "已生成【草稿】Release: $VER —— 固件已上传，但还没有对外发布。"
+          echo "请到 Releases 页面审核，确认无误后点 'Publish release'："
+          echo "    https://github.com/${GITHUB_REPOSITORY}/releases"
+
+          # 同时写进本次运行的 Summary（点进 Actions 后第一眼就能看到）
+          {
+            echo ""
+            echo "=============================================================="
+            echo "  已生成【草稿】Release: $VER"
+            echo "  固件已经上传，但还没有对外发布 —— 这一步就是等你人工审核。"
+            echo ""
+            echo "  去这里看一眼、确认无误后点 'Publish release'："
+            echo "      https://github.com/${GITHUB_REPOSITORY}/releases"
+            echo ""
+            echo "  不想发就点 'Delete' 把草稿删掉，对已有版本没有任何影响。"
+            echo "=============================================================="
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "草稿地址: $url"
 
 # =============================================================================
-#  一次性设置：开启人工审批
+#  人工审核步骤（每次发版都要做）
 #
-#  仓库 → Settings → Environments → New environment → 名字填 release → 保存
-#    → 勾选 "Required reviewers" → 填上自己的 GitHub 账号 → Save protection rules
+#  1. 打开  https://github.com/<你的账号>/<仓库名>/releases
+#  2. 最上面会有一条带 "Draft" 橙色标签的 Release（就是刚才生成的）
+#  3. 下载 .bin / .hex 检查 —— 也可以拿 SHA256SUMS.txt 核对：
+#         sha256sum -c SHA256SUMS.txt
+#  4. 确认没问题 → 点右上角 "Edit" → 滑到底 → "Publish release"
+#     有问题     → 点 "Delete" 删掉草稿，改完重新打 tag（或重新跑 workflow）
 #
-#  之后 publish 这个 job 就会停在 Waiting for approval。
-#  想加"发版必须两个人点头"，把第二个账号也加进 reviewers 即可（全部批准才放行）。
-#
-#  注意：没配置这个 environment 时，GitHub 会在首次运行时自动建一个【没有保护规则】的
-#  environment —— publish 会直接跑，看起来就像审批功能没生效。所以这一步必须手动做。
+#  点完 Publish 之后，这次发版才算真正完成。
 # =============================================================================
